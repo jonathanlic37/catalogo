@@ -4,7 +4,9 @@ import { defineConfig, devices } from '@playwright/test';
 // Se ejecuta contra el stack real (`docker compose up`): no levanta servidores propios.
 export default defineConfig({
   testDir: './tests',
-  timeout: 120_000,
+  // Un único test recorre todo el flujo (login, sincronización, edición, conflicto, filtros, temas);
+  // en los runners de CI tarda ~2 min, así que se deja margen.
+  timeout: 180_000,
   expect: { timeout: 20_000 },
   fullyParallel: false, // un único flujo sobre datos compartidos
   workers: 1,

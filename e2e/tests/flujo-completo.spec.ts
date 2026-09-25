@@ -148,13 +148,15 @@ test('flujo completo en el navegador', async ({ page }) => {
     await shot(page, '09-registro-de-eventos');
   });
 
-  await test.step('revisión visual: tema claro (el oscuro es el predeterminado) y móvil', async () => {
+  await test.step('revisión visual: tema oscuro (el claro es el predeterminado) y móvil', async () => {
     await page.getByRole('link', { name: /Catálogo, ir al inicio/ }).click();
-    await shot(page, '10-tema-oscuro');
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+    await shot(page, '10-tema-claro');
+    await page.getByRole('button', { name: /Cambiar a tema oscuro/ }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await shot(page, '11-tema-oscuro');
     await page.getByRole('button', { name: /Cambiar a tema claro/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-    await shot(page, '11-tema-claro');
-    await page.getByRole('button', { name: /Cambiar a tema oscuro/ }).click();
     await page.setViewportSize({ width: 390, height: 844 });
     await shot(page, '12-movil');
   });
