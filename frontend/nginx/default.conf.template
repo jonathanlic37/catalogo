@@ -1,6 +1,10 @@
 # frontend/nginx/default.conf.template
 server_tokens off;
 
+# Límite de peticiones por IP hacia la API (mitiga abuso/DoS básico). Ajustable por entorno.
+limit_req_zone $binary_remote_addr zone=api:10m rate=${RATE_LIMIT_RATE};
+limit_req_status 429;
+
 gzip on;
 gzip_comp_level 5;
 gzip_min_length 1024;
@@ -26,6 +30,7 @@ server {
     # del cliente, de modo que el navegador no puede suplantar otro token.
     location /api/ {
         include /etc/nginx/snippets/security-headers.conf;
+        limit_req zone=api burst=${RATE_LIMIT_BURST} nodelay;
         add_header Cache-Control "no-store" always;
         # El Consumer (Spring Security) ya envía estas cabeceras: se descartan para no duplicarlas.
         proxy_hide_header X-Frame-Options;

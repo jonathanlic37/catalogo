@@ -90,6 +90,8 @@ services:
     environment:
       CONSUMER_UPSTREAM: http://consumer-api:8080
       FRONTEND_TO_CONSUMER_TOKEN: ${FRONTEND_TO_CONSUMER_TOKEN:?definir en .env}
+      RATE_LIMIT_RATE: ${RATE_LIMIT_RATE:-20r/s}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
     # La UI no tiene autenticación de usuario (nginx inyecta el token del servicio), por lo que
     # por defecto solo escucha en localhost. Para exponerla en la red, pon FRONTEND_BIND=0.0.0.0
     # únicamente detrás de un proxy con TLS y autenticación.

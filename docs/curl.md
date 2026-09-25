@@ -114,7 +114,12 @@ curl -s "$PRODUCER/actuator/health/liveness"
 
 # Métricas de sincronización (protegidas con Bearer)
 curl -s "$CONSUMER/actuator/prometheus" -H "$FRONT_AUTH" | grep '^sync_outbox'
+
+# Reconciliación manual: trae ahora los cambios hechos en el Producer
+curl -s -X POST "$CONSUMER/api/reconcile" -H "$FRONT_AUTH"
 ```
+
+El proxy nginx limita las peticiones a `/api` por IP (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`); al superarlas responde **429**.
 
 La política de conflicto se configura con `SYNC_CONFLICT_POLICY` (`MANUAL` | `PRODUCER_WINS` |
 `CONSUMER_WINS`). Para probar `PRODUCER_WINS`, edita el mismo ítem en el Producer y en el Consumer

@@ -17,7 +17,8 @@ public record ItemResponse(
         long version) {
 
     public static ItemResponse from(Item i) {
-        return new ItemResponse(i.getId(), i.getNombre(), i.getDescripcion(), i.getEstado(), i.getTipo(),
+        return new ItemResponse(i.getId(), i.getNombre(), i.getDescripcion(), i.getEstado(),
+                i.getTipo() != null ? i.getTipo() : TipoContenido.PRODUCTO,
                 i.getFechaCreacion(), i.getFechaActualizacion(), i.getVersion());
     }
 }

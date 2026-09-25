@@ -41,6 +41,10 @@ public class ReconcileService {
         this.client = client;
     }
 
+    /** Resumen de una reconciliación: altas, actualizaciones y bajas aplicadas a la réplica. */
+    public record ReconcileResult(int created, int updated, int deleted) {
+    }
+
     @Scheduled(initialDelay = 3000, fixedDelayString = "${app.sync.reconcile-interval-ms}")
     public void scheduled() {
         try {
@@ -50,9 +54,11 @@ public class ReconcileService {
         }
     }
 
-    public void reconcileAll() {
+    public ReconcileResult reconcileAll() {
         Instant fetchStartedAt = Instant.now();
         Set<String> remoteIds = new HashSet<>();
+        int[] created = {0};
+        int[] updated = {0};
 
         client.forEachPage(page -> {
             for (ProducerItem r : page) {
@@ -60,9 +66,11 @@ public class ReconcileService {
                 Optional<Item> local = repository.findById(r.id());
                 if (local.isEmpty()) {
                     repository.save(ItemMapper.applyRemote(new Item(), r));
+                    created[0]++;
                 } else if (local.get().getSyncStatus() == SyncStatus.CONFIRMED
                         && r.version() > local.get().getVersion()) {
                     repository.save(ItemMapper.applyRemote(local.get(), r));
+                    updated[0]++;
                 }
             }
         });
@@ -70,11 +78,14 @@ public class ReconcileService {
         // Un ítem CONFIRMED ausente de la lista pudo borrarse en el Producer, o haberse desplazado
         // entre páginas mientras se recorría. Se confirma con una consulta puntual antes de borrar,
         // y se ignoran los modificados tras iniciar el recorrido (p. ej. recién creados).
+        int deleted = 0;
         for (String id : repository.findIdsByStatusUpdatedBefore(SyncStatus.CONFIRMED, fetchStartedAt)) {
             if (!remoteIds.contains(id) && client.fetch(id).isEmpty()) {
                 repository.deleteById(id);
+                deleted++;
             }
         }
+        return new ReconcileResult(created[0], updated[0], deleted);
     }
 
     /** Descarta el cambio local de un ítem FAILED, retira sus eventos del outbox y recupera el Producer. */

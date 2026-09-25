@@ -59,6 +59,9 @@ El Producer es la aplicación central, así que también puede **originar** dato
 - **Métricas de sincronización**: Micrometer publica `sync.outbox.attempts|success|failures|retries|conflicts` y los gauges `sync.outbox.pending|failed` en `/actuator/prometheus` (protegido con Bearer).
 - **Contract tests**: ambos módulos validan sus payloads contra fixtures compartidos (`contracts/webhook-created.json`, `contracts/item-response.json`).
 - **Multi-tipo de contenido**: la entidad incluye `tipo` (`PRODUCTO|SERVICIO|CONTENIDO`); añadir tipos no requiere cambios de esquema.
+- **Reconciliación manual**: `POST /api/reconcile` (botón «Sincronizar ahora» en la UI) fuerza la sincronización y devuelve cuántos ítems se sembraron, actualizaron o borraron.
+- **Purga del outbox**: los eventos `SENT` se eliminan pasado `SYNC_OUTBOX_RETENTION_DAYS` (7 por defecto); los `FAILED` se conservan para reintento/auditoría.
+- **Rate limiting**: nginx limita por IP las peticiones a `/api` (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`, responde 429).
 
 ### Copias de seguridad y restauración
 
@@ -104,14 +107,28 @@ docker run --rm -v "$PWD/producer-api":/app -v catalogo-m2:/root/.m2 -w /app mav
 docker run --rm -v "$PWD/consumer-api":/app -v catalogo-m2:/root/.m2 -w /app maven:3.9-eclipse-temurin-21 mvn -q -B test
 ```
 
-- `producer-api`: `WebhookIdempotencyTest` (15 pruebas) — duplicados, conflicto de clave, versión obsoleta, actualización y borrado idempotentes, escritura directa (crear/editar/borrar) y su 401, eventos fuera de orden, contract test del webhook y de la respuesta, paginación, 401, validación sin stack trace, códigos estándar (415/400), purga de idempotencia, backup y validación de tokens.
-- `frontend` (14 pruebas, Vitest + Testing Library; se ejecutan en una copia aislada para no escribir en el proyecto):
+- `producer-api`: `WebhookIdempotencyTest` (16 pruebas) — duplicados, conflicto de clave, versión obsoleta, actualización y borrado idempotentes, escritura directa (crear/editar/borrar) y su 401, eventos fuera de orden, contract test del webhook y de la respuesta, paginación, 401, validación sin stack trace, códigos estándar (415/400), purga de idempotencia, backup legible con los datos y validación de tokens.
+- `frontend` (15 pruebas, Vitest + Testing Library; se ejecutan en una copia aislada para no escribir en el proyecto):
   ```bash
   docker run --rm -v "$PWD/frontend":/src:ro -w /tmp node:22-alpine sh -c \
     "mkdir /work && cd /src && tar cf - --exclude=node_modules --exclude=dist . | tar xf - -C /work \
      && cd /work && npm install --no-audit --no-fund >/dev/null 2>&1 && npx vitest run && npx tsc --noEmit"
   ```
-- `consumer-api`: `SyncServiceWireMockTest` (13 pruebas) — el webhook llega al Producer (WireMock) con Bearer, `Idempotency-Key` y `X-Event-Type`; reintentos con la misma clave; rechazo 4xx → `FAILED`; edición y borrado (incluido 404 idempotente); contract test del payload; paginación, búsqueda y resumen; reconciliación; seguridad y errores estándar.
+- `consumer-api`: `SyncServiceWireMockTest` (15 pruebas) + `OutboxBatchCutoffTest` (1) — el webhook llega al Producer (WireMock) con Bearer, `Idempotency-Key` y `X-Event-Type`; reintentos con la misma clave; rechazo 4xx → `FAILED`; edición y borrado (incluido 404 idempotente); contract test del payload; reconciliación manual con resumen; purga del outbox; paginación, búsqueda y resumen; seguridad y errores estándar; corte del lote con el Producer caído.
+
+### Integración continua
+
+`.github/workflows/ci.yml` corre en cada push/PR a `main`:
+`backend` (tests de ambos módulos, matriz), `frontend` (vitest + tsc), `compose` (valida `docker compose config`) y `e2e`
+(levanta el stack con `docker compose up -d --build` y ejecuta `scripts/smoke-test.sh`, que recorre salud, 401,
+alta vía Consumer, confirmación en el Producer, idempotencia del webhook, alta directa en el Producer y reconciliación).
+
+Para correr el smoke en local con el stack levantado:
+
+```bash
+docker compose up -d --build
+./scripts/smoke-test.sh
+```
 
 ### Desarrollo del frontend sin Docker
 

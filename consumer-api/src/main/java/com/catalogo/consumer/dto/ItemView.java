@@ -22,7 +22,8 @@ public record ItemView(
         String syncError) {
 
     public static ItemView from(Item i) {
-        return new ItemView(i.getId(), i.getNombre(), i.getDescripcion(), i.getEstado(), i.getTipo(),
+        return new ItemView(i.getId(), i.getNombre(), i.getDescripcion(), i.getEstado(),
+                i.getTipo() != null ? i.getTipo() : TipoContenido.PRODUCTO,
                 i.getFechaCreacion(), i.getFechaActualizacion(), i.getVersion(),
                 i.getSyncStatus(), i.getPendingEvent(), i.getLastSyncError());
     }
