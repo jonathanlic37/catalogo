@@ -197,6 +197,29 @@ Además, la proyección del Consumer guarda el estado de sincronización de cada
 `syncStatus` (`PENDING`/`CONFIRMED`/`FAILED`), la operación pendiente y el último error. El
 Producer guarda `lastEventAt` para ordenar los eventos que no traen versión.
 
+### Cómo se cumple la regla SSoT
+
+| Regla del enunciado | Cómo se garantiza |
+|---|---|
+| El Producer define el estado oficial | Al aceptar un cambio, su respuesta (campos, versión y fechas) **sustituye** la copia del Consumer. La reconciliación solo acepta versiones mayores del Producer. |
+| El Consumer mantiene solo una copia | Nada que decida el Consumer es definitivo; ver las dos precisiones de abajo. |
+| Un cambio no es definitivo hasta que el Producer lo acepta | Las escrituras responden `202` con `syncStatus=PENDING` y solo pasan a `CONFIRMED` con la respuesta del Producer. Mientras, la UI muestra «Pendiente de confirmación» y bloquea la edición del ítem. |
+| El Consumer no modifica la BD del Producer | No tiene conexión ni volumen de esa BD: solo su URL HTTP. Su credencial solo sirve para el webhook y para leer; si escribe por la API de administración recibe `403`. |
+| Bases de datos completamente separadas | Un fichero SQLite por API, cada uno en su volumen (`producer-data`, `consumer-data`) y montado solo por su servicio. Toda comunicación es HTTP. |
+
+**Qué guarda el Consumer además de la copia.** Metadatos de sincronización (estado, operación
+pendiente, outbox y registro de eventos) y, **de forma temporal**, el valor local de un cambio que
+el Producer aún no ha aceptado. Así un cambio no se pierde si el Producer está caído, pero siempre
+aparece marcado como pendiente o fallido y nunca como oficial. Si el Producer rechaza un alta, ese
+ítem existe solo en la proyección, marcado con error, hasta que el usuario lo descarta.
+
+**Quién define la identidad.** En un alta desde la UI, el id (UUID) lo genera el Consumer, y el
+Producer lo valida (formato y que no exista; si existe, `409`) y acepta o rechaza el alta. En las
+altas directas en el Producer lo asigna el Producer. Se eligió así para que el ítem tenga la misma
+identidad en ambas BD desde el primer momento y los reintentos sean idempotentes sin traducir
+identificadores. La alternativa (id asignado siempre por el Producer) obligaría al Consumer a
+guardar un id temporal y remapearlo al confirmar, con más estados intermedios.
+
 ## 5. Flujo de sincronización
 
 Los pasos siguen el flujo del enunciado:
