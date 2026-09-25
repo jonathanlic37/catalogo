@@ -18,13 +18,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClientException;
 
 /**
  * Mantiene la réplica alineada con la fuente de verdad: siembra una réplica vacía, recoge cambios
  * hechos directamente en el Producer y permite descartar un cambio local rechazado (resync).
  * Nunca toca ítems con cambios locales PENDING/FAILED.
+ *
+ * <p>Las llamadas HTTP al Producer se hacen fuera de transacción (el pool SQLite es de 1 conexión)
+ * y cada escritura vuelve a leer el ítem dentro de su propia transacción: si el usuario lo ha
+ * editado mientras tanto (ya no está CONFIRMED), la reconciliación no lo pisa.
  */
 @Service
 public class ReconcileService {
@@ -34,11 +39,16 @@ public class ReconcileService {
     private final ItemRepository repository;
     private final OutboxEventRepository outbox;
     private final ProducerWebhookClient client;
+    private final SyncMetrics metrics;
+    private final TransactionTemplate tx;
 
-    public ReconcileService(ItemRepository repository, OutboxEventRepository outbox, ProducerWebhookClient client) {
+    public ReconcileService(ItemRepository repository, OutboxEventRepository outbox, ProducerWebhookClient client,
+                            SyncMetrics metrics, PlatformTransactionManager txManager) {
         this.repository = repository;
         this.outbox = outbox;
         this.client = client;
+        this.metrics = metrics;
+        this.tx = new TransactionTemplate(txManager);
     }
 
     /** Resumen de una reconciliación: altas, actualizaciones y bajas aplicadas a la réplica. */
@@ -48,7 +58,10 @@ public class ReconcileService {
     @Scheduled(initialDelay = 3000, fixedDelayString = "${app.sync.reconcile-interval-ms}")
     public void scheduled() {
         try {
-            reconcileAll();
+            ReconcileResult r = reconcileAll();
+            if (r.created() + r.updated() + r.deleted() > 0) {
+                log.info("Reconciliación: {} nuevos, {} actualizados, {} eliminados", r.created(), r.updated(), r.deleted());
+            }
         } catch (RestClientException | IllegalStateException e) {
             log.warn("Reconciliación omitida: Producer no disponible");
         }
@@ -63,15 +76,18 @@ public class ReconcileService {
         client.forEachPage(page -> {
             for (ProducerItem r : page) {
                 remoteIds.add(r.id());
-                Optional<Item> local = repository.findById(r.id());
-                if (local.isEmpty()) {
-                    repository.save(ItemMapper.applyRemote(new Item(), r));
-                    created[0]++;
-                } else if (local.get().getSyncStatus() == SyncStatus.CONFIRMED
-                        && r.version() > local.get().getVersion()) {
-                    repository.save(ItemMapper.applyRemote(local.get(), r));
-                    updated[0]++;
-                }
+                tx.executeWithoutResult(s -> {
+                    Optional<Item> local = repository.findById(r.id());
+                    if (local.isEmpty()) {
+                        repository.save(ItemMapper.applyRemote(new Item(), r));
+                        created[0]++;
+                    } else if (local.get().getSyncStatus() == SyncStatus.CONFIRMED
+                            && r.version() > local.get().getVersion()) {
+                        // Versión monótona: nunca se sustituye la proyección por un estado más antiguo.
+                        repository.save(ItemMapper.applyRemote(local.get(), r));
+                        updated[0]++;
+                    }
+                });
             }
         });
 
@@ -81,32 +97,48 @@ public class ReconcileService {
         int deleted = 0;
         for (String id : repository.findIdsByStatusUpdatedBefore(SyncStatus.CONFIRMED, fetchStartedAt)) {
             if (!remoteIds.contains(id) && client.fetch(id).isEmpty()) {
-                repository.deleteById(id);
-                deleted++;
+                Boolean removed = tx.execute(s -> repository.findById(id)
+                        .filter(i -> i.getSyncStatus() == SyncStatus.CONFIRMED)
+                        .map(i -> {
+                            repository.delete(i);
+                            return true;
+                        })
+                        .orElse(false));
+                if (Boolean.TRUE.equals(removed)) {
+                    deleted++;
+                }
             }
         }
+        metrics.reconciled(created[0], updated[0], deleted);
         return new ReconcileResult(created[0], updated[0], deleted);
     }
 
     /** Descarta el cambio local de un ítem FAILED, retira sus eventos del outbox y recupera el Producer. */
-    @Transactional
     public ItemView resync(String id) {
-        Item local = repository.findById(id)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Ítem no encontrado"));
-        if (local.getSyncStatus() != SyncStatus.FAILED) {
-            throw new ApiException(HttpStatus.CONFLICT, "Solo se pueden resincronizar ítems con sincronización fallida");
-        }
+        requireFailed(repository.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Ítem no encontrado")));
         Optional<ProducerItem> remote;
         try {
             remote = client.fetch(id);
         } catch (RestClientException | IllegalStateException e) {
             throw new ApiException(HttpStatus.BAD_GATEWAY, "Producer no disponible");
         }
-        outbox.deleteByItemId(id);
-        if (remote.isEmpty()) {
-            repository.delete(local);
-            return null;
+        return tx.execute(s -> {
+            Item local = requireFailed(repository.findById(id)
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Ítem no encontrado")));
+            outbox.deleteByItemId(id);
+            if (remote.isEmpty()) {
+                repository.delete(local);
+                return null;
+            }
+            return ItemView.from(repository.save(ItemMapper.applyRemote(local, remote.get())));
+        });
+    }
+
+    private static Item requireFailed(Item item) {
+        if (item.getSyncStatus() != SyncStatus.FAILED) {
+            throw new ApiException(HttpStatus.CONFLICT, "Solo se pueden resincronizar ítems con sincronización fallida");
         }
-        return ItemView.from(repository.save(ItemMapper.applyRemote(local, remote.get())));
+        return item;
     }
 }

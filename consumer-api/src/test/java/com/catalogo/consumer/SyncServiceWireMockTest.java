@@ -12,6 +12,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -19,6 +20,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.catalogo.consumer.dto.ProducerItem;
 import com.catalogo.consumer.maintenance.OutboxPurger;
 import com.catalogo.consumer.model.EventType;
 import com.catalogo.consumer.model.OutboxEvent;
@@ -48,16 +50,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /** Valida el flujo Consumer → webhook → Producer (simulado con WireMock). */
 @SpringBootTest
 @AutoConfigureMockMvc
+@AutoConfigureObservability // activa el registro Prometheus (en tests Spring Boot lo desactiva por defecto)
 class SyncServiceWireMockTest {
 
     private static final String FRONT_TOKEN = "front-token-0123456789-abcdefghijklmnopqrstuvwxyz";
@@ -78,7 +84,8 @@ class SyncServiceWireMockTest {
         r.add("spring.datasource.url", () -> "jdbc:sqlite:" + tmp.resolve("consumer-test.db"));
         r.add("app.producer.base-url", () -> "http://localhost:" + producer.port());
         r.add("app.producer.token", () -> PRODUCER_TOKEN);
-        r.add("app.security.frontend-token", () -> FRONT_TOKEN);
+        r.add("app.oidc.issuer", () -> "http://localhost:8095/realms/catalogo");
+        r.add("app.oidc.jwk-set-uri", () -> "http://localhost:1/jwks");
         r.add("app.cors.allowed-origins", () -> "http://localhost:8088");
         r.add("app.sync.retry-interval-ms", () -> "200");
         r.add("app.sync.max-retries", () -> "8");
@@ -94,17 +101,23 @@ class SyncServiceWireMockTest {
     @Autowired ReconcileService reconcile;
     @Autowired OutboxEventRepository outbox;
     @Autowired OutboxPurger purger;
+    @Autowired ObjectMapper objectMapper;
 
     @BeforeEach
     void reset() {
         producer.resetAll();
     }
 
+    /** Simula un JWT válido con el rol de usuario (el resource server confía en este contexto). */
+    private static RequestPostProcessor user() {
+        return jwt().authorities(new SimpleGrantedAuthority("ROLE_user"));
+    }
+
     private StubMapping stubOk() {
         return producer.stubFor(WireMock.post(urlEqualTo(WEBHOOK)).willReturn(aResponse()
                 .withStatus(201).withHeader("Content-Type", "application/json")
                 .withBody("{\"id\":\"{{jsonPath request.body '$.id'}}\",\"nombre\":\"{{jsonPath request.body '$.nombre'}}\","
-                        + "\"descripcion\":\"molido\",\"estado\":\"ACTIVO\","
+                        + "\"descripcion\":\"molido\",\"estado\":\"ACTIVO\",\"tipo\":\"{{jsonPath request.body '$.tipo'}}\","
                         + "\"fechaCreacion\":\"2026-01-01T00:00:00Z\",\"fechaActualizacion\":\"2026-01-01T00:00:00Z\","
                         + "\"version\":1}")));
     }
@@ -114,7 +127,7 @@ class SyncServiceWireMockTest {
     }
 
     private String create(String nombre) throws Exception {
-        String json = mvc.perform(post("/api/items").header("Authorization", "Bearer " + FRONT_TOKEN)
+        String json = mvc.perform(post("/api/items").with(user())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"%s\",\"descripcion\":\"molido\",\"estado\":\"ACTIVO\"}".formatted(nombre)))
                 .andExpect(status().isAccepted())
@@ -128,7 +141,7 @@ class SyncServiceWireMockTest {
     }
 
     private String syncStatus(String id) throws Exception {
-        String json = mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+        String json = mvc.perform(get("/api/items/" + id).with(user()))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return JsonPath.read(json, "$.syncStatus");
     }
@@ -139,7 +152,7 @@ class SyncServiceWireMockTest {
 
     private void awaitGone(String id) {
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
-                mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+                mvc.perform(get("/api/items/" + id).with(user()))
                         .andExpect(status().isNotFound()));
     }
 
@@ -156,7 +169,7 @@ class SyncServiceWireMockTest {
                 .withHeader("X-Event-Type", equalTo("CREATED"))
                 .withRequestBody(containing(id)));
 
-        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/" + id).with(user()))
                 .andExpect(jsonPath("$.version").value(1))
                 .andExpect(jsonPath("$.pendingOperation").doesNotExist());
     }
@@ -167,7 +180,7 @@ class SyncServiceWireMockTest {
         String id = create();
         awaitConfirmed(id);
 
-        mvc.perform(put("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN)
+        mvc.perform(put("/api/items/" + id).with(user())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Cafe 2\",\"estado\":\"INACTIVO\"}"))
                 .andExpect(status().isAccepted())
@@ -208,7 +221,7 @@ class SyncServiceWireMockTest {
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(id)).isEqualTo("FAILED"));
         assertThat(producer.findAll(postRequestedFor(urlEqualTo(WEBHOOK)).withRequestBody(containing(id)))).hasSize(1);
-        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/" + id).with(user()))
                 .andExpect(jsonPath("$.syncError").value(org.hamcrest.Matchers.containsString("Conflicto")));
     }
 
@@ -218,7 +231,7 @@ class SyncServiceWireMockTest {
         String id = create();
         awaitConfirmed(id);
 
-        mvc.perform(delete("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(delete("/api/items/" + id).with(user()))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.pendingOperation").value("DELETED"));
 
@@ -234,7 +247,7 @@ class SyncServiceWireMockTest {
 
         producer.resetMappings();
         stubStatus(404);
-        mvc.perform(delete("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(delete("/api/items/" + id).with(user()))
                 .andExpect(status().isAccepted());
 
         awaitGone(id);
@@ -245,7 +258,7 @@ class SyncServiceWireMockTest {
         stubStatus(503);
         String id = create();
 
-        mvc.perform(put("/api/items/" + id).header("Authorization", "Bearer " + FRONT_TOKEN)
+        mvc.perform(put("/api/items/" + id).with(user())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"x\",\"estado\":\"ACTIVO\"}"))
                 .andExpect(status().isConflict());
@@ -259,24 +272,24 @@ class SyncServiceWireMockTest {
             awaitConfirmed(create(tag + "-" + i));
         }
 
-        mvc.perform(get("/api/items?q=" + tag + "&size=2").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?q=" + tag + "&size=2").with(user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.length()").value(2))
                 .andExpect(jsonPath("$.totalElements").value(3))
                 .andExpect(jsonPath("$.totalPages").value(2))
                 .andExpect(jsonPath("$.last").value(false));
-        mvc.perform(get("/api/items?q=" + tag + "&size=2&page=1").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?q=" + tag + "&size=2&page=1").with(user()))
                 .andExpect(jsonPath("$.content.length()").value(1))
                 .andExpect(jsonPath("$.last").value(true));
         // Los comodines de LIKE del usuario se escapan: "%" no equivale a "todo".
-        mvc.perform(get("/api/items?q=%25").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?q=%25").with(user()))
                 .andExpect(jsonPath("$.totalElements").value(0));
-        mvc.perform(get("/api/items?estado=INACTIVO&q=" + tag).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?estado=INACTIVO&q=" + tag).with(user()))
                 .andExpect(jsonPath("$.totalElements").value(0));
-        mvc.perform(get("/api/items?size=100000").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?size=100000").with(user()))
                 .andExpect(jsonPath("$.size").value(100));
 
-        mvc.perform(get("/api/items/summary").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/summary").with(user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").isNumber())
                 .andExpect(jsonPath("$.pendientes").isNumber())
@@ -295,7 +308,7 @@ class SyncServiceWireMockTest {
 
         reconcile.reconcileAll();
 
-        mvc.perform(get("/api/items/" + seeded).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/" + seeded).with(user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.syncStatus").value("CONFIRMED"))
                 .andExpect(jsonPath("$.version").value(5));
@@ -307,7 +320,7 @@ class SyncServiceWireMockTest {
                 .withBody("{\"content\":[],\"page\":0,\"size\":500,\"totalElements\":0,\"totalPages\":0,\"last\":true}")));
         producer.stubFor(WireMock.get(urlPathEqualTo("/api/items/" + seeded)).willReturn(aResponse().withStatus(404)));
         reconcile.reconcileAll();
-        mvc.perform(get("/api/items/" + seeded).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/" + seeded).with(user()))
                 .andExpect(status().isNotFound());
     }
 
@@ -337,19 +350,23 @@ class SyncServiceWireMockTest {
         mvc.perform(get("/api/items")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/items").header("Authorization", "Bearer otro")).andExpect(status().isUnauthorized());
 
-        mvc.perform(post("/api/items").header("Authorization", "Bearer " + FRONT_TOKEN)
+        mvc.perform(post("/api/items").with(user())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"nombre\":\"\",\"estado\":\"ACTIVO\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors.nombre").exists())
                 .andExpect(jsonPath("$.trace").doesNotExist());
 
         // Antes caían en el manejador genérico y devolvían 500.
-        mvc.perform(post("/api/items").header("Authorization", "Bearer " + FRONT_TOKEN)
+        mvc.perform(post("/api/items").with(user())
                         .contentType(MediaType.TEXT_PLAIN).content("x"))
                 .andExpect(status().isUnsupportedMediaType());
-        mvc.perform(get("/api/items?estado=NOPE").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items?estado=NOPE").with(user()))
                 .andExpect(status().isBadRequest());
-        mvc.perform(get("/api/items/no-existe").header("Authorization", "Bearer " + FRONT_TOKEN))
+        // Validación estricta: el cliente no puede colar campos que no le corresponden.
+        mvc.perform(post("/api/items").with(user()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"X\",\"estado\":\"ACTIVO\",\"syncStatus\":\"CONFIRMED\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/items/no-existe").with(user()))
                 .andExpect(status().isNotFound());
     }
 
@@ -365,6 +382,88 @@ class SyncServiceWireMockTest {
         Set<String> actual = keys(sent.getBodyAsString());
         Set<String> expected = nonNullKeys(resource("/contracts/webhook-created.json"));
         assertThat(actual).as("claves del payload enviado al Producer").isEqualTo(expected);
+    }
+
+    @Test
+    void elConsumerEntiendeLaRespuestaCanonicaDelContratoSinPerderCampos() throws Exception {
+        String json = resource("/contracts/item-response.json");
+
+        // Se deserializa con el mismo ObjectMapper que usa el cliente HTTP del Consumer.
+        ProducerItem parsed = objectMapper.readValue(json, ProducerItem.class);
+
+        Set<String> modelFields = java.util.Arrays.stream(ProducerItem.class.getRecordComponents())
+                .map(java.lang.reflect.RecordComponent::getName)
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertThat(modelFields).as("el modelo del Consumer cubre exactamente el contrato").isEqualTo(keys(json));
+        assertThat(parsed.id()).isNotBlank();
+        assertThat(parsed.estado()).isNotNull();
+        assertThat(parsed.tipo()).isNotNull();
+        assertThat(parsed.fechaCreacion()).isNotNull();
+        assertThat(parsed.fechaActualizacion()).isNotNull();
+        assertThat(parsed.version()).isPositive();
+    }
+
+    @Test
+    void filtraPorTipoYPorEstadoDeSincronizacion() throws Exception {
+        stubOk();
+        String tag = "tipo" + UUID.randomUUID().toString().substring(0, 8);
+        String servicio = mvc.perform(post("/api/items").with(user()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"%s-s\",\"estado\":\"ACTIVO\",\"tipo\":\"SERVICIO\"}".formatted(tag)))
+                .andExpect(status().isAccepted()).andReturn().getResponse().getContentAsString();
+        awaitConfirmed(JsonPath.read(servicio, "$.id"));
+        awaitConfirmed(create(tag + "-p"));
+
+        mvc.perform(get("/api/items?tipo=SERVICIO&q=" + tag).with(user()))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].tipo").value("SERVICIO"));
+        mvc.perform(get("/api/items?tipo=PRODUCTO&q=" + tag).with(user()))
+                .andExpect(jsonPath("$.totalElements").value(1));
+
+        producer.resetMappings();
+        stubStatus(409);
+        String fallido = create(tag + "-f");
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(fallido)).isEqualTo("FAILED"));
+        mvc.perform(get("/api/items?sync=FAILED&q=" + tag).with(user()))
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(fallido));
+        mvc.perform(get("/api/items?sync=NOPE").with(user())).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void registroDeEventosFallidosConSuMotivo() throws Exception {
+        stubStatus(409);
+        String id = create();
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(id)).isEqualTo("FAILED"));
+
+        String json = mvc.perform(get("/api/sync/events?status=FAILED&size=100").with(user()))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        List<String> itemIds = JsonPath.read(json, "$.content[*].itemId");
+        assertThat(itemIds).contains(id);
+        List<String> errors = JsonPath.read(json, "$.content[?(@.itemId == '" + id + "')].lastError");
+        assertThat(errors).singleElement().asString().contains("Conflicto");
+        List<Object> payloads = JsonPath.read(json, "$.content[*].payload");
+        assertThat(payloads).as("el registro no expone el payload").isEmpty();
+
+        mvc.perform(get("/api/sync/events")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void lasMetricasDeSincronizacionSoloParaAdministradores() throws Exception {
+        mvc.perform(get("/actuator/prometheus")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/actuator/prometheus").with(user())).andExpect(status().isForbidden());
+        String body = mvc.perform(get("/actuator/prometheus")
+                        .with(jwt().authorities(new SimpleGrantedAuthority("ROLE_admin"))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(body).contains("sync_outbox_attempts_total", "sync_outbox_pending", "sync_reconcile_runs_total");
+    }
+
+    @Test
+    void healthchecksDiferenciadosSonPublicos() throws Exception {
+        mvc.perform(get("/actuator/health/liveness")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
+        mvc.perform(get("/actuator/health/readiness")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 
     private String resource(String path) throws Exception {
@@ -401,11 +500,11 @@ class SyncServiceWireMockTest {
                         + "\"page\":0,\"size\":500,\"totalElements\":1,\"totalPages\":1,\"last\":true}")
                         .formatted(seeded))));
 
-        mvc.perform(post("/api/reconcile").header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(post("/api/reconcile").with(user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.created").value(1));
 
-        mvc.perform(get("/api/items/" + seeded).header("Authorization", "Bearer " + FRONT_TOKEN))
+        mvc.perform(get("/api/items/" + seeded).with(user()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.syncStatus").value("CONFIRMED"));
 
@@ -437,5 +536,7 @@ class SyncServiceWireMockTest {
         assertThatThrownBy(() -> TokenValidator.requireStrong("T", "cambiar-token-frontend-a-consumer-0000000000000000"))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(TokenValidator.requireStrong("T", FRONT_TOKEN)).isEqualTo(FRONT_TOKEN);
+        String dev = "dev-only-consumer-to-producer-token-for-local-use-0001";
+        assertThat(TokenValidator.requireStrong("T", dev)).isEqualTo(dev);
     }
 }

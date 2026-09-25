@@ -1,0 +1,69 @@
+{
+  "realm": "catalogo",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Usuario del catálogo: consulta y modifica ítems a través de la Consumer API" },
+      { "name": "admin", "description": "Administrador: además, acceso a las métricas de sincronización (/actuator/prometheus)" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "catalogo-ui",
+      "name": "Catálogo UI (SPA)",
+      "description": "Cliente público del SPA: Authorization Code + PKCE (S256). Sin password grant.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://localhost:8088/*", "http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:8088", "http://localhost:5173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8088/*##http://localhost:5173/*"
+      }
+    },
+    {
+      "clientId": "catalogo-cli",
+      "name": "Catálogo CLI (solo desarrollo)",
+      "description": "Cliente para obtener un token desde curl, Postman y el smoke test con usuario/contraseña. Solo entornos locales: en producción se eliminaría.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "username": "demo",
+      "enabled": true,
+      "email": "demo@catalogo.local",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "${DEMO_USER_PASSWORD}", "temporary": false }],
+      "realmRoles": ["user"]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@catalogo.local",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [{ "type": "password", "value": "${DEMO_ADMIN_PASSWORD}", "temporary": false }],
+      "realmRoles": ["user", "admin"]
+    }
+  ]
+}

@@ -6,6 +6,8 @@ import com.catalogo.consumer.model.OutboxStatus;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, String> {
@@ -19,4 +21,6 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, String
     long deleteByStatusAndSentAtBefore(OutboxStatus status, Instant before);
 
     long countByStatus(OutboxStatus status);
+
+    Page<OutboxEvent> findByStatus(OutboxStatus status, Pageable pageable);
 }

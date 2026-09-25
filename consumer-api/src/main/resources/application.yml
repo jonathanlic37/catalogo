@@ -18,8 +18,10 @@ spring:
     timeout-per-shutdown-phase: 20s
   task:
     scheduling:
+      # relay del outbox, reconciliación, métricas y purga: cada tarea en su hilo para que una
+      # reconciliación larga no retrase el reenvío de cambios pendientes.
       pool:
-        size: 2
+        size: 4
   datasource:
     url: jdbc:sqlite:${DB_PATH:./consumer.db}?journal_mode=WAL&busy_timeout=5000
     driver-class-name: org.sqlite.JDBC
@@ -32,6 +34,10 @@ spring:
     open-in-view: false
   jackson:
     default-property-inclusion: non_null
+    # Validación estricta de lo que envía la UI: un campo desconocido es un 400. Las respuestas del
+    # Producer se leen con DTOs tolerantes (@JsonIgnoreProperties en ProducerItem/ProducerPage).
+    deserialization:
+      fail-on-unknown-properties: true
 
 management:
   endpoints:
@@ -43,6 +49,14 @@ management:
       show-details: never
       probes:
         enabled: true
+      # liveness: el proceso responde. readiness: además su BD SQLite está disponible. No depende
+      # del Producer a propósito: con el Producer caído el Consumer sigue sirviendo su proyección y
+      # encolando cambios en el outbox (degradación controlada en vez de fallo en cascada).
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
   health:
     livenessstate:
       enabled: true
@@ -55,8 +69,10 @@ app:
     token: ${CONSUMER_TO_PRODUCER_TOKEN}
     connect-timeout-ms: 3000
     read-timeout-ms: 5000
-  security:
-    frontend-token: ${FRONTEND_TO_CONSUMER_TOKEN}
+  # OAuth2/OIDC: issuer público (el que ve el navegador) y JWKS interno (el que alcanza el contenedor).
+  oidc:
+    issuer: ${OIDC_ISSUER:http://localhost:8095/realms/catalogo}
+    jwk-set-uri: ${OIDC_JWK_SET_URI:http://auth:8080/realms/catalogo/protocol/openid-connect/certs}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8088}
   sync:
