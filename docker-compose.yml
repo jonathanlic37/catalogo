@@ -1,4 +1,7 @@
 # docker-compose.yml
+#
+# Arranque:  cp .env.example .env && docker compose up --build
+# Orden garantizado por healthchecks: auth + producer-api → consumer-api → frontend.
 name: catalogo
 
 # Rotación de logs: sin esto el driver json-file crece sin límite.
@@ -24,6 +27,43 @@ x-java-service: &java-service
   restart: unless-stopped
 
 services:
+  # Proveedor de identidad OIDC/OAuth2 (Keycloak) para los usuarios de la UI. Modo dev con H2
+  # embebido e import del realm (auth/catalogo-realm.json) en cada arranque.
+  # El navegador lo alcanza en http://localhost:${KEYCLOAK_PORT}; el Consumer, en http://auth:8080.
+  auth:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?definir en .env}
+      # Contraseñas de los usuarios de demostración: el realm versionado solo tiene placeholders
+      # (${DEMO_USER_PASSWORD}…) que Keycloak resuelve desde estas variables al importarlo.
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:?definir en .env}
+      DEMO_ADMIN_PASSWORD: ${DEMO_ADMIN_PASSWORD:?definir en .env}
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8095}
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      # Heap acotado: el modo dev re-augmenta al arrancar y el host tiene otros servicios.
+      JAVA_OPTS_APPEND: "-Xms64m -Xmx512m"
+    volumes:
+      - ./auth:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8095}:8080"
+    # `debug` (no interna) permite publicar el puerto; `backend` da acceso al Consumer (JWKS).
+    networks: [backend, debug]
+    mem_limit: 1g
+    logging: *default-logging
+    # La imagen no trae curl/wget: se consulta /health/ready (puerto de gestión 9000) con bash y
+    # /dev/tcp, usando solo builtins (sano = línea de estado HTTP 200).
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r st <&3 && case \"$$st\" in *' 200'*) exit 0 ;; *) exit 1 ;; esac"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    restart: unless-stopped
+
   producer-api:
     <<: *java-service
     build: ./producer-api
@@ -34,10 +74,13 @@ services:
       BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
       BACKUP_INTERVAL_MS: ${BACKUP_INTERVAL_MS:-21600000}
       BACKUP_KEEP: ${BACKUP_KEEP:-8}
+      IDEMPOTENCY_RETENTION_DAYS: ${IDEMPOTENCY_RETENTION_DAYS:-7}
+      # Dos credenciales: la del Consumer (webhook + lectura) y la de administración (escritura directa).
       CONSUMER_TO_PRODUCER_TOKEN: ${CONSUMER_TO_PRODUCER_TOKEN:?definir en .env}
+      PRODUCER_ADMIN_TOKEN: ${PRODUCER_ADMIN_TOKEN:?definir en .env}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
     volumes:
-      - producer-data:/data
+      - producer-data:/data          # SQLite de la fuente de verdad (volumen propio)
       - producer-backups:/backups
     ports:
       - "127.0.0.1:${PRODUCER_PORT:-8082}:8080"
@@ -60,15 +103,19 @@ services:
     environment:
       SERVER_PORT: 8080
       DB_PATH: /data/consumer.db
+      # URL del webhook fijada por configuración: ningún usuario puede cambiar el destino.
       PRODUCER_BASE_URL: http://producer-api:8080
       CONSUMER_TO_PRODUCER_TOKEN: ${CONSUMER_TO_PRODUCER_TOKEN:?definir en .env}
-      FRONTEND_TO_CONSUMER_TOKEN: ${FRONTEND_TO_CONSUMER_TOKEN:?definir en .env}
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8095/realms/catalogo}
+      OIDC_JWK_SET_URI: ${OIDC_JWK_SET_URI:-http://auth:8080/realms/catalogo/protocol/openid-connect/certs}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
       SYNC_MAX_RETRIES: ${SYNC_MAX_RETRIES:-5}
       SYNC_RETRY_INTERVAL_MS: ${SYNC_RETRY_INTERVAL_MS:-10000}
+      SYNC_RECONCILE_INTERVAL_MS: ${SYNC_RECONCILE_INTERVAL_MS:-60000}
       SYNC_CONFLICT_POLICY: ${SYNC_CONFLICT_POLICY:-MANUAL}
+      SYNC_OUTBOX_RETENTION_DAYS: ${SYNC_OUTBOX_RETENTION_DAYS:-7}
     volumes:
-      - consumer-data:/data
+      - consumer-data:/data          # SQLite de la proyección + outbox (volumen propio)
     ports:
       - "127.0.0.1:${CONSUMER_PORT:-8081}:8080"
     networks: [backend, frontend]
@@ -83,18 +130,24 @@ services:
     build:
       context: ./frontend
       args:
+        # Configuración pública del SPA (se incrusta en el bundle): ningún token ni secreto.
         VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_OIDC_AUTHORITY: ${OIDC_ISSUER:-http://localhost:8095/realms/catalogo}
+        VITE_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-catalogo-ui}
+        VITE_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8088/callback}
     depends_on:
       consumer-api:
         condition: service_healthy
+      auth:
+        condition: service_healthy
     environment:
       CONSUMER_UPSTREAM: http://consumer-api:8080
-      FRONTEND_TO_CONSUMER_TOKEN: ${FRONTEND_TO_CONSUMER_TOKEN:?definir en .env}
+      # Origen del IdP que la CSP permite para el login OIDC (descubrimiento y canje del código).
+      OIDC_ORIGIN: http://localhost:${KEYCLOAK_PORT:-8095}
       RATE_LIMIT_RATE: ${RATE_LIMIT_RATE:-20r/s}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
-    # La UI no tiene autenticación de usuario (nginx inyecta el token del servicio), por lo que
-    # por defecto solo escucha en localhost. Para exponerla en la red, pon FRONTEND_BIND=0.0.0.0
-    # únicamente detrás de un proxy con TLS y autenticación.
+    # Los usuarios se autentican con OIDC; aun así la UI solo escucha en localhost por defecto
+    # (HTTP sin TLS). Para exponerla, FRONTEND_BIND=0.0.0.0 detrás de un proxy con TLS.
     ports:
       - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-8088}:8080"
     networks: [frontend]
