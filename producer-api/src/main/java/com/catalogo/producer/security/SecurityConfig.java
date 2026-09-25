@@ -2,7 +2,9 @@
 package com.catalogo.producer.security;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,12 +20,32 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
+/**
+ * Dos credenciales con privilegios distintos (mínimo privilegio):
+ * <ul>
+ *   <li><b>SERVICE</b> ({@code CONSUMER_TO_PRODUCER_TOKEN}): la que tiene el Consumer. Solo puede
+ *       enviar el webhook y leer (reconciliación). No puede escribir directamente en la fuente de
+ *       verdad: todo cambio del Consumer entra validado por el webhook.</li>
+ *   <li><b>ADMIN</b> ({@code PRODUCER_ADMIN_TOKEN}): la de la aplicación central. Puede leer y
+ *       crear/editar/borrar ítems directamente, y ver métricas. No puede suplantar al Consumer en el
+ *       webhook.</li>
+ * </ul>
+ */
 @Configuration
 public class SecurityConfig {
 
+    static final String SERVICE = "SERVICE";
+    static final String ADMIN = "ADMIN";
+
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http,
-                                    @Value("${app.security.consumer-token}") String token) throws Exception {
+                                    @Value("${app.security.consumer-token}") String consumerToken,
+                                    @Value("${app.security.admin-token}") String adminToken) throws Exception {
+        Map<String, String> tokens = new LinkedHashMap<>();
+        tokens.put(SERVICE, TokenValidator.requireStrong("CONSUMER_TO_PRODUCER_TOKEN", consumerToken));
+        tokens.put(ADMIN, TokenValidator.requireStrong("PRODUCER_ADMIN_TOKEN", adminToken));
+        TokenValidator.requireDistinct("CONSUMER_TO_PRODUCER_TOKEN", consumerToken, "PRODUCER_ADMIN_TOKEN", adminToken);
+
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
@@ -31,18 +53,26 @@ public class SecurityConfig {
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
-                        .requestMatchers("/api/**", "/webhooks/**", "/actuator/prometheus").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/webhooks/catalogo").hasRole(SERVICE)
+                        .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole(SERVICE, ADMIN)
+                        .requestMatchers("/api/**").hasRole(ADMIN)
+                        .requestMatchers("/actuator/prometheus").hasRole(ADMIN)
                         .anyRequest().denyAll())
-                .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
-                    res.setStatus(401);
-                    res.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-                    res.getWriter().write(
-                            "{\"title\":\"Unauthorized\",\"status\":401,\"detail\":\"Token ausente o inválido\"}");
-                }))
-                .addFilterBefore(new BearerTokenFilter(
-                        TokenValidator.requireStrong("CONSUMER_TO_PRODUCER_TOKEN", token)),
-                        UsernamePasswordAuthenticationFilter.class);
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint((req, res, ex) -> problem(res, 401, "Unauthorized",
+                                "Token ausente o inválido"))
+                        .accessDeniedHandler((req, res, ex) -> problem(res, 403, "Forbidden",
+                                "La credencial no tiene permiso para esta operación")))
+                .addFilterBefore(new BearerTokenFilter(tokens), UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    private static void problem(jakarta.servlet.http.HttpServletResponse res, int status, String title, String detail)
+            throws java.io.IOException {
+        res.setStatus(status);
+        res.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        res.setCharacterEncoding("UTF-8");
+        res.getWriter().write("{\"title\":\"%s\",\"status\":%d,\"detail\":\"%s\"}".formatted(title, status, detail));
     }
 
     @Bean

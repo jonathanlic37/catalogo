@@ -32,6 +32,10 @@ spring:
     open-in-view: false
   jackson:
     default-property-inclusion: non_null
+    # Validación estricta: un campo desconocido en el webhook o en la API de administración es un 400,
+    # no se ignora en silencio (detecta desalineaciones de contrato y payloads manipulados).
+    deserialization:
+      fail-on-unknown-properties: true
 
 management:
   endpoints:
@@ -43,6 +47,13 @@ management:
       show-details: never
       probes:
         enabled: true
+      # liveness: el proceso responde (reiniciar si falla). readiness: además la BD SQLite está
+      # disponible (dejar de enviar tráfico si falla). Compose usa readiness para el orden de arranque.
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
   health:
     livenessstate:
       enabled: true
@@ -51,7 +62,10 @@ management:
 
 app:
   security:
+    # Credencial del Consumer: solo webhook + lectura.
     consumer-token: ${CONSUMER_TO_PRODUCER_TOKEN}
+    # Credencial de administración de la aplicación central: escritura directa + lectura + métricas.
+    admin-token: ${PRODUCER_ADMIN_TOKEN}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8088}
   idempotency:

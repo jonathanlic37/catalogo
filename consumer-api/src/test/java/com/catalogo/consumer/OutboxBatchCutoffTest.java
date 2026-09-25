@@ -50,7 +50,6 @@ class OutboxBatchCutoffTest {
         r.add("spring.datasource.url", () -> "jdbc:sqlite:" + tmp.resolve("cutoff.db"));
         r.add("app.producer.base-url", () -> "http://localhost:" + producer.port());
         r.add("app.producer.token", () -> "producer-token-0123456789-abcdefghijklmnopqrstuvwxyz");
-        r.add("app.security.frontend-token", () -> "front-token-0123456789-abcdefghijklmnopqrstuvwxyz");
         r.add("app.cors.allowed-origins", () -> "http://localhost:8088");
         // Intervalos altos: el relay solo se dispara cuando el test lo invoca.
         r.add("app.sync.retry-interval-ms", () -> "3600000");

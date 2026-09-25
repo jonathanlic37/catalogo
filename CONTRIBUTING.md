@@ -35,13 +35,17 @@ Para saltarlo de forma consciente (p. ej. una emergencia): `ALLOW_PUSH_MAIN=1 gi
 No hace falta Java/Node local: las pruebas corren en Docker.
 
 ```bash
-docker run --rm -v "$PWD/producer-api":/app -v catalogo-m2:/root/.m2 -w /app maven:3.9-eclipse-temurin-21 mvn -q -B test
-docker run --rm -v "$PWD/consumer-api":/app -v catalogo-m2:/root/.m2 -w /app maven:3.9-eclipse-temurin-21 mvn -q -B test
+# Los backends montan la raíz del repo: los contratos compartidos viven en contracts/.
+docker run --rm -v "$PWD":/work -v catalogo-m2:/root/.m2 -w /work/producer-api maven:3.9-eclipse-temurin-21 mvn -q -B test
+docker run --rm -v "$PWD":/work -v catalogo-m2:/root/.m2 -w /work/consumer-api maven:3.9-eclipse-temurin-21 mvn -q -B test
 docker run --rm -v "$PWD/frontend":/src:ro -w /tmp node:22-alpine sh -c \
   "mkdir /work && cd /src && tar cf - --exclude=node_modules --exclude=dist . | tar xf - -C /work \
-   && cd /work && npm install --no-audit --no-fund >/dev/null 2>&1 && npx vitest run && npx tsc --noEmit"
+   && cd /work && npm ci --no-audit --no-fund >/dev/null 2>&1 && npx vitest run && npx tsc --noEmit"
 docker compose config -q
+# Con el stack levantado: ./scripts/smoke-test.sh
 ```
+
+Si cambias un contrato entre las APIs, edítalo en `contracts/`: ambos módulos lo verifican.
 
 ## Nunca versionar
 

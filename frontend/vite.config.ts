@@ -2,9 +2,8 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vitest/config';
 
-// En desarrollo, /api se reenvía a la Consumer API. El token Bearer NO vive en el frontend:
-// en producción lo inyecta el nginx del contenedor; en dev se puede exportar DEV_CONSUMER_TOKEN
-// en el shell (nunca con prefijo VITE_, para que no entre al bundle).
+// En desarrollo, /api se reenvía a la Consumer API. El Authorization lo aporta el SPA (JWT del IdP
+// vía OIDC + PKCE) y el proxy solo lo reenvía; no hay ningún token en el bundle ni en el shell.
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -13,9 +12,6 @@ export default defineConfig({
       '/api': {
         target: process.env.DEV_CONSUMER_URL ?? 'http://localhost:8081',
         changeOrigin: true,
-        headers: process.env.DEV_CONSUMER_TOKEN
-          ? { Authorization: `Bearer ${process.env.DEV_CONSUMER_TOKEN}` }
-          : {},
       },
     },
   },

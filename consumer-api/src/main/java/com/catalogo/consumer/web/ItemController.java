@@ -6,6 +6,8 @@ import com.catalogo.consumer.dto.ItemView;
 import com.catalogo.consumer.dto.PageResponse;
 import com.catalogo.consumer.dto.SummaryView;
 import com.catalogo.consumer.model.Estado;
+import com.catalogo.consumer.model.SyncStatus;
+import com.catalogo.consumer.model.TipoContenido;
 import com.catalogo.consumer.service.ItemService;
 import com.catalogo.consumer.sync.ReconcileService;
 import jakarta.validation.Valid;
@@ -41,9 +43,11 @@ public class ItemController {
     public PageResponse<ItemView> list(@RequestParam(defaultValue = "0") int page,
                                        @RequestParam(defaultValue = "25") int size,
                                        @RequestParam(required = false) String q,
-                                       @RequestParam(required = false) Estado estado) {
+                                       @RequestParam(required = false) Estado estado,
+                                       @RequestParam(required = false) TipoContenido tipo,
+                                       @RequestParam(required = false) SyncStatus sync) {
         String query = q == null ? null : q.substring(0, Math.min(q.length(), MAX_QUERY_LENGTH));
-        return service.list(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE), query, estado);
+        return service.list(Math.max(page, 0), Math.min(Math.max(size, 1), MAX_PAGE_SIZE), query, estado, tipo, sync);
     }
 
     @GetMapping("/summary")

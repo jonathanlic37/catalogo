@@ -50,8 +50,6 @@ jobs:
       - name: docker compose config
         run: |
           cp .env.example .env
-          sed -i "s/^CONSUMER_TO_PRODUCER_TOKEN=.*/CONSUMER_TO_PRODUCER_TOKEN=$(openssl rand -hex 32)/" .env
-          sed -i "s/^FRONTEND_TO_CONSUMER_TOKEN=.*/FRONTEND_TO_CONSUMER_TOKEN=$(openssl rand -hex 32)/" .env
           docker compose config -q
 
   e2e:
@@ -59,15 +57,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Exactamente las instrucciones del README: el sistema debe arrancar desde cero con .env.example.
       - name: Preparar .env
-        run: |
-          cp .env.example .env
-          sed -i "s/^CONSUMER_TO_PRODUCER_TOKEN=.*/CONSUMER_TO_PRODUCER_TOKEN=$(openssl rand -hex 32)/" .env
-          sed -i "s/^FRONTEND_TO_CONSUMER_TOKEN=.*/FRONTEND_TO_CONSUMER_TOKEN=$(openssl rand -hex 32)/" .env
+        run: cp .env.example .env
       - name: Levantar el stack
         run: docker compose up -d --build
       - name: Smoke test
         run: ./scripts/smoke-test.sh
+      # E2E de navegador ligero: solo Chromium (sin la imagen Docker de Playwright).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: E2E de navegador (Playwright + Chromium)
+        working-directory: e2e
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          set -a; source ../.env; set +a
+          npx playwright test
+      - name: Capturas y reporte E2E
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
       - name: Logs en caso de fallo
         if: failure()
         run: docker compose logs --no-color

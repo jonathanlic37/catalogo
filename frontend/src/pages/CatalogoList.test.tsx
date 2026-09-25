@@ -59,6 +59,22 @@ describe('CatalogoList', () => {
     expect(screen.getByLabelText('Página siguiente')).toBeDisabled();
   });
 
+  it('filtra por tipo y por sincronización en el servidor; la tarjeta "Con error" es un atajo', async () => {
+    const fetchMock = mockFetch((_m, url) => (url.startsWith('/api/items/summary') ? summary({ fallidos: 2 }) : page([item()])));
+    render();
+    await screen.findByText('Café');
+
+    await userEvent.selectOptions(screen.getByLabelText('Filtrar por tipo'), 'SERVICIO');
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).includes('tipo=SERVICIO'))).toBe(true));
+
+    await userEvent.click(screen.getByRole('button', { name: /Con error/ }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('sync=FAILED') && String(u).includes('tipo=SERVICIO'))).toBe(true),
+    );
+    expect(screen.getByRole('button', { name: /Con error/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Filtrar por sincronización')).toHaveValue('FAILED');
+  });
+
   it('muestra el estado vacío cuando no hay ítems', async () => {
     mockFetch((_m, url) => (url.startsWith('/api/items/summary') ? summary() : page([])));
     render();

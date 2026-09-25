@@ -1,6 +1,12 @@
 # frontend/nginx/default.conf.template
 server_tokens off;
 
+# Origen del IdP para la CSP (security-headers.conf). Se inyecta desde OIDC_ORIGIN al arrancar, así
+# cambiar KEYCLOAK_PORT/issuer no exige reconstruir la imagen.
+map $host $oidc_origin {
+    default "${OIDC_ORIGIN}";
+}
+
 # Límite de peticiones por IP hacia la API (mitiga abuso/DoS básico). Ajustable por entorno.
 limit_req_zone $binary_remote_addr zone=api:10m rate=${RATE_LIMIT_RATE};
 limit_req_status 429;
@@ -26,8 +32,8 @@ server {
         return 200 "ok";
     }
 
-    # El token se inyecta aquí (runtime), nunca en el bundle JS. Se sobrescribe el Authorization
-    # del cliente, de modo que el navegador no puede suplantar otro token.
+    # El Authorization lo aporta el navegador: el SPA obtiene un JWT del IdP (OIDC + PKCE) y lo envía;
+    # nginx solo lo reenvía. Ningún token se incluye en el bundle JS.
     location /api/ {
         include /etc/nginx/snippets/security-headers.conf;
         limit_req zone=api burst=${RATE_LIMIT_BURST} nodelay;
@@ -37,7 +43,6 @@ server {
         proxy_hide_header X-Content-Type-Options;
         proxy_hide_header Cache-Control;
         proxy_pass ${CONSUMER_UPSTREAM}/api/;
-        proxy_set_header Authorization "Bearer ${FRONTEND_TO_CONSUMER_TOKEN}";
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_connect_timeout 3s;

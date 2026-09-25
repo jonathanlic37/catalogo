@@ -47,7 +47,10 @@ import org.springframework.test.web.servlet.ResultActions;
 @AutoConfigureMockMvc
 class WebhookIdempotencyTest {
 
+    /** Credencial del Consumer (SERVICE): webhook + lectura. */
     private static final String TOKEN = "test-token-0123456789-abcdefghijklmnopqrstuvwxyz";
+    /** Credencial de administración (ADMIN): escritura directa + lectura + métricas. */
+    private static final String ADMIN = "admin-token-0123456789-abcdefghijklmnopqrstuvwxyz";
 
     @TempDir
     static Path tmp;
@@ -56,6 +59,7 @@ class WebhookIdempotencyTest {
     static void props(DynamicPropertyRegistry r) {
         r.add("spring.datasource.url", () -> "jdbc:sqlite:" + tmp.resolve("producer-test.db"));
         r.add("app.security.consumer-token", () -> TOKEN);
+        r.add("app.security.admin-token", () -> ADMIN);
         r.add("app.cors.allowed-origins", () -> "http://localhost:8088");
         r.add("app.backup.dir", () -> tmp.resolve("backups").toString());
         r.add("app.backup.keep", () -> "2");
@@ -245,7 +249,7 @@ class WebhookIdempotencyTest {
 
     @Test
     void escrituraDirectaEnElProducerCreaActualizaYBorra() throws Exception {
-        String created = mvc.perform(post("/api/items").header("Authorization", "Bearer " + TOKEN)
+        String created = mvc.perform(post("/api/items").header("Authorization", "Bearer " + ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Directo\",\"descripcion\":\"d\",\"estado\":\"ACTIVO\"}"))
                 .andExpect(status().isCreated())
@@ -258,14 +262,14 @@ class WebhookIdempotencyTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.nombre").value("Directo"));
 
-        mvc.perform(put("/api/items/" + id).header("Authorization", "Bearer " + TOKEN)
+        mvc.perform(put("/api/items/" + id).header("Authorization", "Bearer " + ADMIN)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nombre\":\"Editado\",\"estado\":\"INACTIVO\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value(2))
                 .andExpect(jsonPath("$.nombre").value("Editado"));
 
-        mvc.perform(delete("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
+        mvc.perform(delete("/api/items/" + id).header("Authorization", "Bearer " + ADMIN))
                 .andExpect(status().isNoContent());
         mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
                 .andExpect(status().isNotFound());
@@ -300,6 +304,95 @@ class WebhookIdempotencyTest {
         // Evento más antiguo entregado tarde: se descarta y no revierte el estado.
         webhook(key(), "UPDATED", old).andExpect(status().isOk())
                 .andExpect(jsonPath("$.nombre").value("Reciente")).andExpect(jsonPath("$.version").value(2));
+    }
+
+    @Test
+    void laVersionPrevaleceSobreOccurredAt() throws Exception {
+        String id = UUID.randomUUID().toString();
+        webhook(key(), "CREATED", ("{\"id\":\"%s\",\"nombre\":\"A\",\"estado\":\"ACTIVO\","
+                + "\"occurredAt\":\"2026-06-01T00:00:00Z\"}").formatted(id)).andExpect(status().isCreated());
+
+        // Basado en la versión vigente pero con un reloj atrasado: se aplica (no depende de relojes).
+        webhook(key(), "UPDATED", ("{\"id\":\"%s\",\"nombre\":\"B\",\"estado\":\"ACTIVO\",\"baseVersion\":1,"
+                + "\"occurredAt\":\"2026-01-01T00:00:00Z\"}").formatted(id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nombre").value("B"))
+                .andExpect(jsonPath("$.version").value(2));
+
+        // Basado en una versión superada, aunque su occurredAt sea el más reciente: conflicto, no se aplica.
+        webhook(key(), "UPDATED", ("{\"id\":\"%s\",\"nombre\":\"C\",\"estado\":\"ACTIVO\",\"baseVersion\":1,"
+                + "\"occurredAt\":\"2027-01-01T00:00:00Z\"}").formatted(id))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
+                .andExpect(jsonPath("$.nombre").value("B"));
+    }
+
+    @Test
+    void borradoConVersionObsoletaDa409YNoBorra() throws Exception {
+        String id = UUID.randomUUID().toString();
+        webhook(key(), "CREATED", body(id, "Vivo")).andExpect(status().isCreated());
+        webhook(key(), "UPDATED", "{\"id\":\"%s\",\"nombre\":\"Vivo 2\",\"estado\":\"ACTIVO\",\"baseVersion\":1}"
+                .formatted(id)).andExpect(status().isOk());
+
+        // El Consumer quería borrar la versión 1, pero la fuente de verdad ya está en la 2.
+        webhook(key(), "DELETED", "{\"id\":\"%s\",\"baseVersion\":1}".formatted(id))
+                .andExpect(status().isConflict());
+        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isOk());
+
+        webhook(key(), "DELETED", "{\"id\":\"%s\",\"baseVersion\":2}".formatted(id)).andExpect(status().isOk());
+        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void separacionDePrivilegiosEntreConsumerYAdministracion() throws Exception {
+        String item = "{\"nombre\":\"X\",\"estado\":\"ACTIVO\"}";
+        // El Consumer NO puede escribir directamente en la fuente de verdad: solo por el webhook.
+        mvc.perform(post("/api/items").header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content(item))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403));
+        mvc.perform(put("/api/items/abc").header("Authorization", "Bearer " + TOKEN)
+                        .contentType(MediaType.APPLICATION_JSON).content(item))
+                .andExpect(status().isForbidden());
+        mvc.perform(delete("/api/items/abc").header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/actuator/prometheus").header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isForbidden());
+
+        // La administración no puede suplantar al Consumer en el webhook.
+        mvc.perform(post("/webhooks/catalogo").header("Authorization", "Bearer " + ADMIN)
+                        .header("Idempotency-Key", key()).header("X-Event-Type", "CREATED")
+                        .contentType(MediaType.APPLICATION_JSON).content(body(UUID.randomUUID().toString(), "Y")))
+                .andExpect(status().isForbidden());
+
+        // Ambas pueden leer.
+        mvc.perform(get("/api/items").header("Authorization", "Bearer " + TOKEN)).andExpect(status().isOk());
+        mvc.perform(get("/api/items").header("Authorization", "Bearer " + ADMIN)).andExpect(status().isOk());
+    }
+
+    @Test
+    void lasCredencialesDeServicioYAdministracionDebenSerDistintas() {
+        assertThatThrownBy(() -> TokenValidator.requireDistinct("A", TOKEN, "B", TOKEN))
+                .isInstanceOf(IllegalStateException.class);
+        TokenValidator.requireDistinct("A", TOKEN, "B", ADMIN);
+    }
+
+    @Test
+    void payloadConCamposDesconocidosSeRechaza() throws Exception {
+        String id = UUID.randomUUID().toString();
+        webhook(key(), "CREATED", "{\"id\":\"%s\",\"nombre\":\"X\",\"estado\":\"ACTIVO\",\"version\":99}".formatted(id))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.trace").doesNotExist());
+        mvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + TOKEN))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void tokenDeDesarrolloDeEnvExampleSeAcepta() {
+        String dev = "dev-only-consumer-to-producer-token-for-local-use-0001";
+        assertThat(TokenValidator.requireStrong("T", dev)).isEqualTo(dev);
     }
 
     private String resource(String path) throws Exception {

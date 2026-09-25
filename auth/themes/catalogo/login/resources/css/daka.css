@@ -1,0 +1,209 @@
+/* auth/themes/catalogo/login/resources/css/daka.css
+   Login de Keycloak con el sistema «DAKA Glass Trend» de la aplicación (frontend/src/styles.css),
+   en su tema claro predeterminado: gris perla #F4F6F9, texto azul marino #001F4F, acento amarillo #FFD100, tarjeta de cristal con blur(16px),
+   Outfit (títulos) + Work Sans (texto) servidas desde el propio tema (sin Google Fonts). */
+
+@font-face { font-family: 'Outfit'; font-weight: 500; font-display: swap; src: url('../fonts/outfit-500.woff2') format('woff2'); }
+@font-face { font-family: 'Outfit'; font-weight: 600; font-display: swap; src: url('../fonts/outfit-600.woff2') format('woff2'); }
+@font-face { font-family: 'Work Sans'; font-weight: 400; font-display: swap; src: url('../fonts/work-sans-400.woff2') format('woff2'); }
+@font-face { font-family: 'Work Sans'; font-weight: 500; font-display: swap; src: url('../fonts/work-sans-500.woff2') format('woff2'); }
+@font-face { font-family: 'Work Sans'; font-weight: 600; font-display: swap; src: url('../fonts/work-sans-600.woff2') format('woff2'); }
+
+:root {
+  /* Paleta DAKA en tema CLARO (predeterminado de la aplicación). El login está en otro origen
+     (Keycloak) y no puede leer la preferencia guardada por la app, así que siempre se muestra claro. */
+  --daka-bg: #F4F6F9;
+  --daka-yellow: #FFD100;
+  --daka-yellow-hover: #F2C500;
+  --daka-on-yellow: #001F4F;
+  --daka-fg: #001F4F;
+  --daka-fg-muted: #4A5B78;
+  --daka-fg-subtle: #64748B;
+  --daka-glass: rgba(255, 255, 255, 0.62);
+  --daka-glass-hover: rgba(255, 255, 255, 0.92);
+  --daka-border: rgba(0, 31, 79, 0.10);
+  --daka-border-strong: rgba(0, 31, 79, 0.2);
+  --daka-input: rgba(255, 255, 255, 0.85);
+  --daka-ring: #B38F00;
+  --daka-focus-border: #D9B200;
+  --daka-focus-halo: 0 0 0 4px rgba(255, 209, 0, 0.16), 0 0 16px 2px rgba(255, 209, 0, 0.22);
+  --daka-danger: #E63946;
+  --daka-danger-fg: #B3141F;
+  --daka-danger-bg: rgba(230, 57, 70, 0.15);
+  --daka-link: #7A5D00;           /* amarillo oscurecido: legible sobre gris perla */
+  --daka-menu: #FFFFFF;
+  --daka-shadow: 0 10px 30px -14px rgba(0, 31, 79, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --daka-glow:
+    radial-gradient(1100px 560px at 88% -12%, rgba(255, 209, 0, 0.22), transparent 62%),
+    radial-gradient(900px 520px at -12% 112%, rgba(0, 31, 79, 0.08), transparent 60%);
+
+  /* Tokens de PatternFly 5 redirigidos a la paleta DAKA */
+  --pf-v5-global--FontFamily--text: 'Work Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --pf-v5-global--FontFamily--heading: 'Outfit', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --pf-v5-global--primary-color--100: var(--daka-yellow);
+  --pf-v5-global--primary-color--200: var(--daka-yellow-hover);
+  --pf-v5-global--link--Color: var(--daka-link);
+  --pf-v5-global--link--Color--hover: var(--daka-fg);
+  --pf-v5-global--Color--100: var(--daka-fg);
+  --pf-v5-global--Color--200: var(--daka-fg-muted);
+  --pf-v5-global--BackgroundColor--100: transparent;
+  --pf-v5-global--danger-color--100: var(--daka-danger);
+  --pf-v5-global--danger-color--200: var(--daka-danger-fg);
+  color-scheme: light;
+}
+
+/* Fondo: azul marino con el mismo resplandor que la aplicación (sustituye la imagen de Keycloak). */
+.login-pf body,
+.login-pf {
+  background: var(--daka-glow), var(--daka-bg) !important;
+  background-attachment: fixed !important;
+  color: var(--daka-fg);
+  font-family: var(--pf-v5-global--FontFamily--text);
+}
+#keycloak-bg { background: transparent; }
+
+/* Cabecera: marca como en la barra de la app (cuadrado amarillo + nombre en Outfit). */
+.pf-v5-c-login__header {
+  --pf-v5-c-login__header--Color: var(--daka-fg);   /* PatternFly lo fija en blanco */
+  color: var(--daka-fg);
+  margin-bottom: 1.5rem;
+}
+.pf-v5-c-login__header #kc-header-wrapper { color: var(--daka-fg) !important; }
+#kc-header-wrapper {
+  display: flex; align-items: center; justify-content: center; gap: 0.75rem;
+  font-family: var(--pf-v5-global--FontFamily--heading); font-weight: 600; font-size: 1.6rem;
+  letter-spacing: -0.02em; color: var(--daka-fg); text-transform: none;
+}
+#kc-header-wrapper::before {
+  content: ''; flex: none; width: 42px; height: 42px; border-radius: 12px;
+  background: var(--daka-yellow)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23001F4F' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7.5 4.27 9 5.15'/%3E%3Cpath d='M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z'/%3E%3Cpath d='m3.3 7 8.7 5 8.7-5'/%3E%3Cpath d='M12 22V12'/%3E%3C/svg%3E")
+    center / 22px no-repeat;
+  box-shadow: 0 10px 24px -12px rgba(179, 143, 0, 0.55);
+}
+
+/* Tarjeta de cristal */
+.pf-v5-c-login__main {
+  background: var(--daka-glass) !important;
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--daka-border);
+  border-radius: 14px;
+  box-shadow: var(--daka-shadow);
+  color: var(--daka-fg);
+}
+.pf-v5-c-login__main-header,
+.pf-v5-c-login__main-body,
+.pf-v5-c-login__main-footer { background: transparent; }
+.pf-v5-c-login__main-footer { border-top: 1px solid var(--daka-border); }
+
+.pf-v5-c-title,
+#kc-page-title {
+  font-family: var(--pf-v5-global--FontFamily--heading); font-weight: 600; letter-spacing: -0.02em;
+  color: var(--daka-fg);
+}
+
+/* Formulario */
+.pf-v5-c-form__label-text { color: var(--daka-fg); font-weight: 600; }
+.pf-v5-c-form__label .pf-v5-c-form__label-required { color: var(--daka-link); }
+
+.pf-v5-c-form-control {
+  --pf-v5-c-form-control--BackgroundColor: var(--daka-input);
+  --pf-v5-c-form-control--Color: var(--daka-fg);
+  --pf-v5-c-form-control--before--BorderColor: transparent;
+  --pf-v5-c-form-control--after--BorderColor: transparent;
+  --pf-v5-c-form-control--hover--after--BorderBottomColor: transparent;
+  --pf-v5-c-form-control--focus--after--BorderBottomColor: transparent;
+  background: var(--daka-input);
+  border: 1px solid var(--daka-border-strong);
+  border-radius: 10px;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+.pf-v5-c-form-control::before,
+.pf-v5-c-form-control::after { border: 0 !important; }
+.pf-v5-c-form-control > input {
+  min-height: 44px; color: var(--daka-fg); background: transparent;
+  font: 400 1rem var(--pf-v5-global--FontFamily--text);
+}
+.pf-v5-c-form-control > input:focus-visible { outline: none !important; }
+.pf-v5-c-form-control > input::placeholder { color: var(--daka-fg-subtle); }
+.pf-v5-c-form-control:hover { border-color: var(--daka-fg-subtle); }
+.pf-v5-c-form-control:focus-within { border-color: var(--daka-focus-border); box-shadow: var(--daka-focus-halo); }
+.pf-v5-c-form-control.pf-m-error,
+.pf-v5-c-form-control[aria-invalid='true'] { border-color: var(--daka-danger); }
+
+/* Botón «mostrar contraseña» */
+.pf-v5-c-button.pf-m-control {
+  --pf-v5-c-button--m-control--BackgroundColor: var(--daka-input);
+  --pf-v5-c-button--m-control--Color: var(--daka-fg-muted);
+  --pf-v5-c-button--m-control--after--BorderColor: transparent;
+  --pf-v5-c-button--m-control--hover--Color: var(--daka-fg);
+  background: var(--daka-input); color: var(--daka-fg-muted);
+  border: 1px solid var(--daka-border-strong); border-left: 0; border-radius: 0 10px 10px 0;
+  min-width: 44px; min-height: 44px;
+}
+.pf-v5-c-button.pf-m-control::after { border: 0 !important; }
+.pf-v5-c-input-group .pf-v5-c-form-control { border-radius: 10px 0 0 10px; }
+
+/* Botón primario amarillo con texto azul marino */
+.pf-v5-c-button.pf-m-primary {
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--daka-yellow);
+  --pf-v5-c-button--m-primary--Color: var(--daka-on-yellow);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--daka-yellow-hover);
+  --pf-v5-c-button--m-primary--hover--Color: var(--daka-on-yellow);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--daka-yellow-hover);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--daka-yellow-hover);
+  background: var(--daka-yellow); color: var(--daka-on-yellow);
+  min-height: 44px; border-radius: 10px; font-weight: 600;
+  font-family: var(--pf-v5-global--FontFamily--text);
+  box-shadow: 0 10px 24px -12px rgba(179, 143, 0, 0.55);
+  transition: background-color 200ms ease, transform 150ms ease;
+}
+.pf-v5-c-button.pf-m-primary:hover { background: var(--daka-yellow-hover); color: var(--daka-on-yellow); }
+.pf-v5-c-button.pf-m-primary:active { transform: translateY(1px); }
+
+/* Enlaces y foco */
+a, .pf-v5-c-button.pf-m-link { color: var(--daka-link); }
+a:hover, .pf-v5-c-button.pf-m-link:hover { color: var(--daka-fg); }
+:focus-visible { outline: 3px solid var(--daka-ring) !important; outline-offset: 2px; }
+
+/* Errores (credenciales inválidas, campos obligatorios) */
+.pf-v5-c-helper-text__item-text,
+.pf-v5-c-form__helper-text,
+.kc-feedback-text,
+#input-error-client-username,
+#input-error-client-password,
+#input-error { color: var(--daka-danger-fg); }
+.pf-v5-c-alert {
+  --pf-v5-c-alert--BackgroundColor: var(--daka-danger-bg);
+  --pf-v5-c-alert--BorderTopColor: var(--daka-danger);
+  background: var(--daka-danger-bg); color: var(--daka-fg);
+  border: 1px solid rgba(230, 57, 70, 0.4); border-radius: 10px; box-shadow: none;
+}
+.pf-v5-c-alert__title { color: var(--daka-danger-fg); }
+.pf-v5-c-alert__icon { color: var(--daka-danger); }
+
+/* Selectores de idioma / listas desplegables */
+.pf-v5-c-menu-toggle, .pf-v5-c-menu { background: var(--daka-menu); color: var(--daka-fg); border-color: var(--daka-border-strong); }
+
+/* Responsive: mismos perfiles que la aplicación (móvil, táctil/POS, pantallas anchas). */
+@media (max-width: 720px) {
+  .pf-v5-c-login__container { padding-left: 1rem; padding-right: 1rem; }
+  .pf-v5-c-login__header { margin-bottom: 1rem; }
+  #kc-header-wrapper { font-size: 1.35rem; }
+  #kc-header-wrapper::before { width: 38px; height: 38px; background-size: 20px; }
+  .pf-v5-c-login__main-body, .pf-v5-c-login__main-header { padding-left: 1.25rem; padding-right: 1.25rem; }
+}
+@media (pointer: coarse) {
+  .pf-v5-c-form-control > input,
+  .pf-v5-c-button.pf-m-primary,
+  .pf-v5-c-button.pf-m-control { min-height: 52px; font-size: 1.05rem; }
+  .pf-v5-c-button.pf-m-control { min-width: 52px; }
+}
+@media (min-width: 1920px) {
+  html { font-size: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+}

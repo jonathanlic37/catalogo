@@ -20,8 +20,13 @@ public class SyncMetrics {
     private final Counter failures;
     private final Counter retries;
     private final Counter conflicts;
+    private final Counter reconcileRuns;
+    private final Counter reconcileCreated;
+    private final Counter reconcileUpdated;
+    private final Counter reconcileDeleted;
     private final AtomicLong pending = new AtomicLong();
     private final AtomicLong failed = new AtomicLong();
+    private final AtomicLong lastReconcileEpochSeconds = new AtomicLong();
 
     public SyncMetrics(MeterRegistry registry, OutboxEventRepository outbox) {
         this.outbox = outbox;
@@ -39,6 +44,25 @@ public class SyncMetrics {
                 .description("Eventos pendientes en el outbox").register(registry);
         Gauge.builder("sync.outbox.failed", failed, AtomicLong::get)
                 .description("Eventos fallidos en el outbox").register(registry);
+        this.reconcileRuns = Counter.builder("sync.reconcile.runs")
+                .description("Reconciliaciones completadas con el Producer").register(registry);
+        this.reconcileCreated = Counter.builder("sync.reconcile.items").tag("change", "created")
+                .description("Ítems sembrados en la proyección por reconciliación").register(registry);
+        this.reconcileUpdated = Counter.builder("sync.reconcile.items").tag("change", "updated")
+                .description("Ítems actualizados en la proyección por reconciliación").register(registry);
+        this.reconcileDeleted = Counter.builder("sync.reconcile.items").tag("change", "deleted")
+                .description("Ítems retirados de la proyección por reconciliación").register(registry);
+        Gauge.builder("sync.reconcile.last.success", lastReconcileEpochSeconds, AtomicLong::get)
+                .description("Epoch (s) de la última reconciliación correcta; permite alertar si la proyección envejece")
+                .baseUnit("seconds").register(registry);
+    }
+
+    public void reconciled(int created, int updated, int deleted) {
+        reconcileRuns.increment();
+        reconcileCreated.increment(created);
+        reconcileUpdated.increment(updated);
+        reconcileDeleted.increment(deleted);
+        lastReconcileEpochSeconds.set(java.time.Instant.now().getEpochSecond());
     }
 
     public void attempt() { attempts.increment(); }

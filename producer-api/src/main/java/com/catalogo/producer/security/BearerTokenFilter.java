@@ -8,21 +8,28 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Autentica con un Bearer token estático comparado en tiempo constante. */
+/**
+ * Autentica con Bearer tokens estáticos, cada uno asociado a un rol (p. ej. SERVICE para el
+ * Consumer, ADMIN para la administración directa). La comparación es en tiempo constante y se
+ * evalúan todos los tokens, de modo que el tiempo de respuesta no revela cuál coincidió.
+ */
 public class BearerTokenFilter extends OncePerRequestFilter {
 
     private static final String PREFIX = "Bearer ";
-    private final byte[] expected;
+    private final Map<String, byte[]> tokensByRole = new LinkedHashMap<>();
 
-    public BearerTokenFilter(String expectedToken) {
-        this.expected = expectedToken.getBytes(StandardCharsets.UTF_8);
+    /** @param tokensByRole rol (sin prefijo ROLE_) → token esperado */
+    public BearerTokenFilter(Map<String, String> tokensByRole) {
+        tokensByRole.forEach((role, token) -> this.tokensByRole.put(role, token.getBytes(StandardCharsets.UTF_8)));
     }
 
     @Override
@@ -31,10 +38,16 @@ public class BearerTokenFilter extends OncePerRequestFilter {
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header != null && header.startsWith(PREFIX)) {
             byte[] given = header.substring(PREFIX.length()).trim().getBytes(StandardCharsets.UTF_8);
-            if (MessageDigest.isEqual(given, expected)) {
+            String matchedRole = null;
+            for (Map.Entry<String, byte[]> e : tokensByRole.entrySet()) {
+                if (MessageDigest.isEqual(given, e.getValue()) && matchedRole == null) {
+                    matchedRole = e.getKey();
+                }
+            }
+            if (matchedRole != null) {
                 SecurityContextHolder.getContext().setAuthentication(
-                        new UsernamePasswordAuthenticationToken("consumer", null,
-                                List.of(new SimpleGrantedAuthority("ROLE_SERVICE"))));
+                        new UsernamePasswordAuthenticationToken(matchedRole.toLowerCase(), null,
+                                List.of(new SimpleGrantedAuthority("ROLE_" + matchedRole))));
             }
         }
         chain.doFilter(request, response);

@@ -1,133 +1,142 @@
-# Pruebas manuales con curl
+# Probar el sistema con curl
 
-Requisitos: entorno levantado (`docker compose up -d --build`) y `.env` cargado en la shell:
+Requisitos: stack levantado (`cp .env.example .env && docker compose up -d --build`), `curl` y
+`python3`. Todos los comandos se ejecutan desde la raíz del repositorio.
 
 ```bash
 set -a; source .env; set +a
 CONSUMER=http://localhost:${CONSUMER_PORT:-8081}
 PRODUCER=http://localhost:${PRODUCER_PORT:-8082}
-FRONT_AUTH="Authorization: Bearer $FRONTEND_TO_CONSUMER_TOKEN"
-PROD_AUTH="Authorization: Bearer $CONSUMER_TO_PRODUCER_TOKEN"
+REALM=http://localhost:${KEYCLOAK_PORT:-8095}/realms/catalogo
+json() { python3 -c "import sys,json;print(json.load(sys.stdin)$1)"; }
+
+# Consumer API: JWT de usuario emitido por Keycloak (cliente catalogo-cli, solo desarrollo).
+TOKEN=$(curl -s -d client_id=catalogo-cli -d grant_type=password -d username=demo -d "password=$DEMO_USER_PASSWORD" \
+  "$REALM/protocol/openid-connect/token" | json "['access_token']")
+FRONT_AUTH="Authorization: Bearer $TOKEN"
+# Producer API: dos credenciales con privilegios distintos.
+PROD_AUTH="Authorization: Bearer $CONSUMER_TO_PRODUCER_TOKEN"   # la del Consumer: webhook + lectura
+ADMIN_PROD_AUTH="Authorization: Bearer $PRODUCER_ADMIN_TOKEN"   # administración: escritura directa
 ```
 
-## 1. Crear un ítem (vía Consumer) → 202 PENDING
+El token de usuario caduca a los 5 minutos: si recibes 401, vuelve a ejecutar la línea `TOKEN=...`.
+
+## 1. Crear información en el Producer (la fuente de verdad)
+
+La escritura directa exige la credencial de administración. La del Consumer recibe **403**: el
+Consumer solo puede cambiar datos a través del webhook.
 
 ```bash
-curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Café molido","descripcion":"500 g","estado":"ACTIVO"}' | tee /tmp/item.json
-ID=$(python3 -c 'import json;print(json.load(open("/tmp/item.json"))["id"])')
+PID=$(curl -s -X POST "$PRODUCER/api/items" -H "$ADMIN_PROD_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Creado en el Producer","descripcion":"origen canónico","estado":"ACTIVO","tipo":"SERVICIO"}' \
+  | json "['id']")
+echo "$PID"
 ```
 
-## 2. Listar (Consumer, réplica) → pasa a CONFIRMED en segundos
+## 2. El Consumer lo sincroniza
 
-La lista es paginada (máx. 100 por página) y admite búsqueda y filtro por estado:
+Ocurre automáticamente cada 60 s (`SYNC_RECONCILE_INTERVAL_MS`). Para no esperar, se puede
+forzar, igual que con el botón «Sincronizar ahora» de la UI:
+
+```bash
+curl -s -X POST "$CONSUMER/api/reconcile" -H "$FRONT_AUTH"        # {"created":1,"updated":0,"deleted":0}
+curl -s "$CONSUMER/api/items/$PID" -H "$FRONT_AUTH"               # syncStatus: CONFIRMED, version: 1
+```
+
+## 3. Consultar la proyección, que es lo que ve React
+
+La lista es paginada (máximo 100 por página). Admite búsqueda por nombre y filtros por estado, por
+tipo y por estado de sincronización:
 
 ```bash
 curl -s "$CONSUMER/api/items?page=0&size=25" -H "$FRONT_AUTH"
-curl -s "$CONSUMER/api/items?q=caf%C3%A9&estado=ACTIVO" -H "$FRONT_AUTH"
-curl -s "$CONSUMER/api/items/summary" -H "$FRONT_AUTH"      # contadores globales
-curl -s "$CONSUMER/api/items/$ID" -H "$FRONT_AUTH"
+curl -s "$CONSUMER/api/items?q=caf%C3%A9&estado=ACTIVO&tipo=PRODUCTO" -H "$FRONT_AUTH"
+curl -s "$CONSUMER/api/items?sync=FAILED" -H "$FRONT_AUTH"         # PENDING | CONFIRMED | FAILED
+curl -s "$CONSUMER/api/items/summary" -H "$FRONT_AUTH"             # contadores globales
 ```
 
-## 3. Comprobar la fuente de verdad (Producer)
+## 4. Modificar desde el Consumer: llega al Producer por webhook
 
 ```bash
-curl -s "$PRODUCER/api/items/$ID" -H "$PROD_AUTH"
+curl -s -X PUT "$CONSUMER/api/items/$PID" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Editado desde el Consumer","descripcion":"vía webhook","estado":"INACTIVO","tipo":"SERVICIO"}'
+# → 202 con syncStatus PENDING: todavía no es definitivo.
+sleep 2
+curl -s "$CONSUMER/api/items/$PID" -H "$FRONT_AUTH"      # CONFIRMED, version 2 (la asignó el Producer)
+curl -s "$PRODUCER/api/items/$PID" -H "$PROD_AUTH"       # el cambio está en la fuente de verdad
 ```
 
-### 3b. Crear/editar/borrar directamente en el Producer (paso 1 del enunciado)
+Crear y eliminar funcionan igual: `POST /api/items` y `DELETE /api/items/{id}` responden 202 y se
+confirman de forma asíncrona.
 
-El Producer es la aplicación central y puede originar datos sin pasar por el Consumer. Los ítems
-así creados los descubre el Consumer en la siguiente reconciliación (ver paso 5).
-
-```bash
-# Crear → 201, id y version asignados por el Producer
-curl -s -X POST "$PRODUCER/api/items" -H "$PROD_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Creado en el Producer","descripcion":"origen canónico","estado":"ACTIVO"}' | tee /tmp/prod-item.json
-PID=$(python3 -c 'import json;print(json.load(open("/tmp/prod-item.json"))["id"])')
-
-# Editar (sube la versión) y borrar
-curl -s -X PUT "$PRODUCER/api/items/$PID" -H "$PROD_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Editado en el Producer","estado":"INACTIVO"}'
-curl -s -X DELETE "$PRODUCER/api/items/$PID" -H "$PROD_AUTH"    # 204
-```
-
-## 4. Editar / eliminar (solo ítems CONFIRMED) → 202
+## 5. Webhook duplicado: idempotencia
 
 ```bash
-curl -s -X PUT "$CONSUMER/api/items/$ID" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Café molido 1 kg","descripcion":"1 kg","estado":"ACTIVO"}'
-curl -s -X DELETE "$CONSUMER/api/items/$ID" -H "$FRONT_AUTH"
-```
-
-## 5. Disparar el webhook directamente contra el Producer
-
-```bash
-KEY=$(uuidgen); NEWID=$(uuidgen)
+KEY=$(python3 -c 'import uuid;print(uuid.uuid4())'); NEWID=$(python3 -c 'import uuid;print(uuid.uuid4())')
 BODY="{\"id\":\"$NEWID\",\"nombre\":\"Directo\",\"descripcion\":\"vía webhook\",\"estado\":\"ACTIVO\"}"
+send() { curl -si -X POST "$PRODUCER/webhooks/catalogo" -H "$PROD_AUTH" -H "Idempotency-Key: $KEY" \
+  -H 'X-Event-Type: CREATED' -H 'Content-Type: application/json' -d "$1" | grep -iE '^HTTP|idempotent-replayed'; }
 
-# Primera entrega → 201, cabecera Idempotent-Replayed: false
-curl -si -X POST "$PRODUCER/webhooks/catalogo" -H "$PROD_AUTH" -H "Idempotency-Key: $KEY" \
-  -H 'X-Event-Type: CREATED' -H 'Content-Type: application/json' -d "$BODY"
-
-# Reenvío idéntico → misma respuesta, Idempotent-Replayed: true, sin duplicar
-curl -si -X POST "$PRODUCER/webhooks/catalogo" -H "$PROD_AUTH" -H "Idempotency-Key: $KEY" \
-  -H 'X-Event-Type: CREATED' -H 'Content-Type: application/json' -d "$BODY"
-
-# Misma clave con otro contenido → 409
-curl -si -X POST "$PRODUCER/webhooks/catalogo" -H "$PROD_AUTH" -H "Idempotency-Key: $KEY" \
-  -H 'X-Event-Type: CREATED' -H 'Content-Type: application/json' \
-  -d "{\"id\":\"$NEWID\",\"nombre\":\"Otro\",\"estado\":\"ACTIVO\"}"
+send "$BODY"     # 201 · Idempotent-Replayed: false
+send "$BODY"     # 201 · Idempotent-Replayed: true  → misma respuesta, no se aplica dos veces
+send "{\"id\":\"$NEWID\",\"nombre\":\"Otro\",\"estado\":\"ACTIVO\"}"   # 409: clave reutilizada con otro contenido
 ```
 
-El ítem creado en el paso 5 aparece en el Consumer tras la siguiente reconciliación
-(`SYNC_RECONCILE_INTERVAL_MS`, 60 s por defecto).
-
-## 6. Seguridad y validación
+## 6. Conflicto: el registro cambió en el Producer antes de recibir la modificación
 
 ```bash
-curl -si "$CONSUMER/api/items"                                   # 401 sin token
-curl -si "$PRODUCER/webhooks/catalogo" -X POST                   # 401 sin token
-curl -si -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" \
-  -H 'Content-Type: application/json' -d '{"nombre":"","estado":"ACTIVO"}'   # 400 ProblemDetail, sin stack trace
+curl -s -X PUT "$PRODUCER/api/items/$PID" -H "$ADMIN_PROD_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Cambio concurrente","estado":"ACTIVO"}'            # el Producer pasa a v3; el Consumer sigue en v2
+curl -s -X PUT "$CONSUMER/api/items/$PID" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Edición basada en v2","estado":"ACTIVO"}'
+sleep 2
+curl -s "$CONSUMER/api/items/$PID" -H "$FRONT_AUTH"                 # FAILED, syncError: "Conflicto: …"
+curl -s "$CONSUMER/api/sync/events?status=FAILED" -H "$FRONT_AUTH"  # registro de eventos fallidos
+curl -s -X POST "$CONSUMER/api/items/$PID/resync" -H "$FRONT_AUTH"  # descartar y adoptar la versión canónica (v3)
 ```
 
-## 7. Resiliencia: Producer caído
+Con `SYNC_CONFLICT_POLICY=PRODUCER_WINS` o `CONSUMER_WINS` en `.env`, el conflicto se resuelve solo.
+
+## 7. El Producer no está disponible
 
 ```bash
 docker compose stop producer-api
-curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Offline","estado":"ACTIVO"}'      # queda PENDING (evento en el outbox)
-docker compose start producer-api                   # el relay programado lo confirma
+OID=$(curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Creado sin Producer","estado":"ACTIVO"}' | json "['id']")
+curl -s "$CONSUMER/api/items/$OID" -H "$FRONT_AUTH"      # PENDING, syncError: "Producer no disponible"
+docker compose restart consumer-api                      # reinicio del Consumer: la proyección y el outbox persisten
+docker compose start producer-api                        # el relay reintenta con backoff y lo confirma
 ```
 
-El cambio no se pierde aunque el Consumer se reinicie: el evento queda en `outbox_events` y el relay
-lo retoma. Los eventos agotados quedan `FAILED` con su motivo y se pueden reintentar
-(`POST /api/items/{id}/retry`) o descartar (`POST /api/items/{id}/resync`).
+Un evento que agota los reintentos queda `FAILED`. Se puede reintentar con
+`POST /api/items/{id}/retry` (misma Idempotency-Key) o descartar con `POST /api/items/{id}/resync`.
 
-## 8. Observabilidad y opcionales
+## 8. Seguridad y validación
 
 ```bash
-# Healthchecks diferenciados (públicos)
+curl -si "$CONSUMER/api/items" | head -1                        # 401 sin token
+curl -si "$CONSUMER/api/items" -H 'Authorization: Bearer x' | head -1   # 401 token inválido
+curl -si -X POST "$PRODUCER/webhooks/catalogo" | head -1        # 401 webhook sin token
+curl -si -X POST "$PRODUCER/api/items" -H "$PROD_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Atajo","estado":"ACTIVO"}' | head -1           # 403: el Consumer no puede saltarse el webhook
+curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"","estado":"ACTIVO"}'                          # 400 ProblemDetail con errores por campo, sin stack trace
+curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
+  -d '{"nombre":"X","estado":"ACTIVO","syncStatus":"CONFIRMED"}' # 400: campo no permitido
+```
+
+## 9. Observabilidad
+
+```bash
+curl -s "$CONSUMER/actuator/health/liveness"      # públicos: liveness (proceso) y readiness (proceso + BD)
 curl -s "$CONSUMER/actuator/health/readiness"
-curl -s "$PRODUCER/actuator/health/liveness"
+curl -s "$PRODUCER/actuator/health/readiness"
 
-# Métricas de sincronización (protegidas con Bearer)
-curl -s "$CONSUMER/actuator/prometheus" -H "$FRONT_AUTH" | grep '^sync_outbox'
-
-# Reconciliación manual: trae ahora los cambios hechos en el Producer
-curl -s -X POST "$CONSUMER/api/reconcile" -H "$FRONT_AUTH"
+# Métricas de sincronización: solo rol admin (usuario admin, contraseña DEMO_ADMIN_PASSWORD).
+ADMIN=$(curl -s -d client_id=catalogo-cli -d grant_type=password -d username=admin -d "password=$DEMO_ADMIN_PASSWORD" \
+  "$REALM/protocol/openid-connect/token" | json "['access_token']")
+curl -s "$CONSUMER/actuator/prometheus" -H "Authorization: Bearer $ADMIN" | grep '^sync_'
 ```
 
-El proxy nginx limita las peticiones a `/api` por IP (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`); al superarlas responde **429**.
-
-La política de conflicto se configura con `SYNC_CONFLICT_POLICY` (`MANUAL` | `PRODUCER_WINS` |
-`CONSUMER_WINS`). Para probar `PRODUCER_WINS`, edita el mismo ítem en el Producer y en el Consumer
-antes de que se confirme el del Consumer; el conflicto (409) se resuelve solo adoptando el del Producer.
-
-El tipo de contenido (`PRODUCTO` | `SERVICIO` | `CONTENIDO`) es opcional al crear/editar:
-
-```bash
-curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
-  -d '{"nombre":"Asesoría","estado":"ACTIVO","tipo":"SERVICIO"}'
-```
+nginx limita las peticiones a `/api` por IP (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`). Al superar el
+límite responde **429**.

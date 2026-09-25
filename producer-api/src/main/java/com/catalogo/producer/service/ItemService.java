@@ -112,14 +112,10 @@ public class ItemService {
     private ItemResponse update(WebhookPayload p) {
         requireNombre(p);
         Item item = find(p.id());
-        if (isStale(item, p)) {
-            // Evento entregado fuera de orden: ya se aplicó uno más reciente. Se devuelve el estado
-            // autoritativo actual sin modificarlo.
+        if (!acceptsChange(item, p)) {
+            // Evento sin versión y entregado fuera de orden: ya se aplicó uno más reciente. Se
+            // devuelve el estado autoritativo actual sin modificarlo.
             return ItemResponse.from(item);
-        }
-        if (p.baseVersion() != null && p.baseVersion() != item.getVersion()) {
-            throw new ApiException(HttpStatus.CONFLICT,
-                    "Versión obsoleta: el ítem ya fue modificado en la fuente de verdad");
         }
         item.setNombre(p.nombre().trim());
         item.setDescripcion(p.descripcion());
@@ -137,7 +133,7 @@ public class ItemService {
 
     private ItemResponse delete(WebhookPayload p) {
         Item item = find(p.id());
-        if (isStale(item, p)) {
+        if (!acceptsChange(item, p)) {
             return ItemResponse.from(item);
         }
         ItemResponse snapshot = ItemResponse.from(item);
@@ -145,9 +141,24 @@ public class ItemService {
         return snapshot;
     }
 
-    private static boolean isStale(Item item, WebhookPayload p) {
-        return p.occurredAt() != null && item.getLastEventAt() != null
-                && p.occurredAt().isBefore(item.getLastEventAt());
+    /**
+     * Decide si un UPDATED/DELETED se aplica. El control principal es la versión (concurrencia
+     * optimista): si el evento declara {@code baseVersion} y no coincide con la actual, el ítem cambió
+     * en la fuente de verdad desde que el Consumer lo leyó → 409, y el cambio no se aplica en silencio.
+     * Si coincide, se aplica aunque {@code occurredAt} sea anterior (evita depender de relojes).
+     * Solo los eventos sin versión se ordenan por {@code occurredAt}: uno más antiguo que el último
+     * aplicado se descarta (evento fuera de orden) sin revertir el estado.
+     */
+    private static boolean acceptsChange(Item item, WebhookPayload p) {
+        if (p.baseVersion() != null) {
+            if (p.baseVersion() != item.getVersion()) {
+                throw new ApiException(HttpStatus.CONFLICT,
+                        "Versión obsoleta: el ítem ya fue modificado en la fuente de verdad");
+            }
+            return true;
+        }
+        return p.occurredAt() == null || item.getLastEventAt() == null
+                || !p.occurredAt().isBefore(item.getLastEventAt());
     }
 
     private Item find(String id) {

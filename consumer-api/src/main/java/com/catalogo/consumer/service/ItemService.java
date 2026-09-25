@@ -52,12 +52,25 @@ public class ItemService {
         this.mapper = mapper;
     }
 
-    /** Lista paginada desde la réplica, con búsqueda por nombre y filtro por estado en base de datos. */
+    /**
+     * Lista paginada desde la réplica. Búsqueda por nombre y filtros por estado, tipo de contenido y
+     * estado de sincronización, todo resuelto en base de datos con parámetros (criteria API).
+     */
     @Transactional(readOnly = true)
-    public PageResponse<ItemView> list(int page, int size, String q, Estado estado) {
+    public PageResponse<ItemView> list(int page, int size, String q, Estado estado, TipoContenido tipo,
+                                       SyncStatus syncStatus) {
         Specification<Item> spec = Specification.where(null);
         if (estado != null) {
             spec = spec.and((root, query, cb) -> cb.equal(root.get("estado"), estado));
+        }
+        if (tipo != null) {
+            // Los registros anteriores a la columna `tipo` (null) cuentan como PRODUCTO.
+            spec = spec.and((root, query, cb) -> tipo == TipoContenido.PRODUCTO
+                    ? cb.or(cb.equal(root.get("tipo"), tipo), cb.isNull(root.get("tipo")))
+                    : cb.equal(root.get("tipo"), tipo));
+        }
+        if (syncStatus != null) {
+            spec = spec.and((root, query, cb) -> cb.equal(root.get("syncStatus"), syncStatus));
         }
         if (q != null && !q.isBlank()) {
             String pattern = "%" + escapeLike(q.trim().toLowerCase()) + "%";

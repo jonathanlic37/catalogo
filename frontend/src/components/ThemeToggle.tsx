@@ -4,11 +4,10 @@ import { useState } from 'react';
 
 type Theme = 'light' | 'dark';
 
-const systemTheme = (): Theme =>
-  window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-
+// DAKA Glass: el tema claro es el predeterminado; el oscuro solo se activa con este conmutador
+// (queda recordado en localStorage).
 const currentTheme = (): Theme =>
-  (document.documentElement.dataset.theme as Theme | undefined) ?? systemTheme();
+  (document.documentElement.dataset.theme as Theme | undefined) === 'dark' ? 'dark' : 'light';
 
 export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(currentTheme);

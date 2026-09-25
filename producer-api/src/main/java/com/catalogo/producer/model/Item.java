@@ -37,7 +37,7 @@ public class Item {
     @Column(length = 20)
     private TipoContenido tipo;
 
-    /** Marca del último evento aplicado; los eventos con occurredAt anterior se descartan. */
+    /** Marca del último evento aplicado; los eventos sin versión con occurredAt anterior se descartan. */
     private Instant lastEventAt;
 
     @Column(nullable = false, updatable = false)

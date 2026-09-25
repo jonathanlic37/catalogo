@@ -7,14 +7,25 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SyncBadge } from '../components/SyncBadge';
+import { StatCard } from '../components/ui/StatCard';
+import { StatusPill } from '../components/ui/StatusPill';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useDeleteItem, useItemsPage, useReconcile, useResyncItem, useRetryItem, useSummary } from '../hooks/useItems';
-import type { Estado, Item, TipoContenido } from '../types/item';
+import type { Estado, Item, SyncStatus, TipoContenido } from '../types/item';
 
 const dateFormat = new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' });
 const PAGE_SIZE = 25;
 
 type Filter = '' | Estado;
+type TipoFilter = '' | TipoContenido;
+type SyncFilter = '' | SyncStatus;
+
+const SYNC_FILTERS: { value: SyncFilter; label: string }[] = [
+  { value: '', label: 'Toda sincronización' },
+  { value: 'CONFIRMED', label: 'Sincronizados' },
+  { value: 'PENDING', label: 'Pendientes de confirmar' },
+  { value: 'FAILED', label: 'Con error' },
+];
 type Pending = { kind: 'delete' | 'discard'; item: Item } | null;
 
 const FILTERS: { value: Filter; label: string }[] = [
@@ -32,11 +43,13 @@ const TIPO_LABEL: Record<TipoContenido, string> = {
 export function CatalogoList() {
   const [search, setSearch] = useState('');
   const [estado, setEstado] = useState<Filter>('');
+  const [tipo, setTipo] = useState<TipoFilter>('');
+  const [syncFilter, setSyncFilter] = useState<SyncFilter>('');
   const [page, setPage] = useState(0);
   const [confirm, setConfirm] = useState<Pending>(null);
   const q = useDebouncedValue(search);
 
-  const list = useItemsPage({ page, size: PAGE_SIZE, q, estado });
+  const list = useItemsPage({ page, size: PAGE_SIZE, q, estado, tipo, sync: syncFilter });
   const summary = useSummary();
   const remove = useDeleteItem();
   const retry = useRetryItem();
@@ -48,10 +61,10 @@ export function CatalogoList() {
   const totalPages = list.data?.totalPages ?? 0;
   const pending = summary.data?.pendientes ?? 0;
   const mutationError = remove.error ?? retry.error ?? resync.error;
-  const hasFilters = q.trim() !== '' || estado !== '';
+  const hasFilters = q.trim() !== '' || estado !== '' || tipo !== '' || syncFilter !== '';
 
-  // Vuelve a la primera página al cambiar la búsqueda o el filtro.
-  useEffect(() => setPage(0), [q, estado]);
+  // Vuelve a la primera página al cambiar la búsqueda o un filtro.
+  useEffect(() => setPage(0), [q, estado, tipo, syncFilter]);
   // Si tras borrar la página actual queda fuera de rango, retrocede a la última existente.
   useEffect(() => {
     if (list.data && list.data.content.length === 0 && page > 0 && totalPages > 0) setPage(totalPages - 1);
@@ -91,10 +104,24 @@ export function CatalogoList() {
       </div>
 
       <div className="stats" aria-label="Resumen del catálogo">
-        <Stat icon={<Layers size={20} />} tone="total" value={summary.data?.total} label="Total de ítems" />
-        <Stat icon={<CheckCircle2 size={20} />} tone="ok" value={summary.data?.activos} label="Activos" />
-        <Stat icon={<Clock size={20} />} tone="warn" value={summary.data?.pendientes} label="Pendientes de confirmar" />
-        <Stat icon={<AlertTriangle size={20} />} tone="fail" value={summary.data?.fallidos} label="Con error" />
+        <StatCard icon={<Layers size={20} />} tone="total" value={summary.data?.total} label="Total de ítems" />
+        <StatCard icon={<CheckCircle2 size={20} />} tone="ok" value={summary.data?.activos} label="Activos" />
+        <StatCard
+          icon={<Clock size={20} />}
+          tone="warn"
+          value={summary.data?.pendientes}
+          label="Pendientes de confirmar"
+          active={syncFilter === 'PENDING'}
+          onClick={() => setSyncFilter(syncFilter === 'PENDING' ? '' : 'PENDING')}
+        />
+        <StatCard
+          icon={<AlertTriangle size={20} />}
+          tone="danger"
+          value={summary.data?.fallidos}
+          label="Con error"
+          active={syncFilter === 'FAILED'}
+          onClick={() => setSyncFilter(syncFilter === 'FAILED' ? '' : 'FAILED')}
+        />
       </div>
 
       {pending > 0 && (
@@ -140,6 +167,26 @@ export function CatalogoList() {
             </label>
           ))}
         </div>
+        <select className="select" value={tipo} onChange={(e) => setTipo(e.target.value as TipoFilter)} aria-label="Filtrar por tipo">
+          <option value="">Todos los tipos</option>
+          {(Object.keys(TIPO_LABEL) as TipoContenido[]).map((t) => (
+            <option key={t} value={t}>
+              {TIPO_LABEL[t]}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select"
+          value={syncFilter}
+          onChange={(e) => setSyncFilter(e.target.value as SyncFilter)}
+          aria-label="Filtrar por sincronización"
+        >
+          {SYNC_FILTERS.map((s) => (
+            <option key={s.label} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="card">
@@ -165,7 +212,7 @@ export function CatalogoList() {
             <h2>{hasFilters ? 'Sin resultados' : 'Aún no hay ítems'}</h2>
             <p>
               {hasFilters
-                ? 'Prueba con otro nombre o cambia el filtro de estado.'
+                ? 'Prueba con otro nombre o cambia los filtros.'
                 : 'Crea el primero y verás cómo se confirma en la fuente de verdad.'}
             </p>
             {!hasFilters && (
@@ -201,10 +248,10 @@ export function CatalogoList() {
                     {item.descripcion || '—'}
                   </td>
                   <td data-label="Estado">
-                    <span className={item.estado === 'ACTIVO' ? 'pill pill-on' : 'pill pill-off'}>
-                      <span className="dot" aria-hidden="true" />
-                      {item.estado === 'ACTIVO' ? 'Activo' : 'Inactivo'}
-                    </span>
+                    <StatusPill
+                      tone={item.estado === 'ACTIVO' ? 'ok' : 'muted'}
+                      label={item.estado === 'ACTIVO' ? 'Activo' : 'Inactivo'}
+                    />
                   </td>
                   <td data-label="Tipo">{TIPO_LABEL[item.tipo] ?? '—'}</td>
                   <td className="cell-date" data-label="Actualizado">
@@ -304,19 +351,5 @@ export function CatalogoList() {
         onCancel={() => setConfirm(null)}
       />
     </section>
-  );
-}
-
-function Stat({ icon, tone, value, label }: { icon: React.ReactNode; tone: string; value?: number; label: string }) {
-  return (
-    <div className="stat">
-      <div className={`stat-icon tone-${tone}`} aria-hidden="true">
-        {icon}
-      </div>
-      <div>
-        <div className="stat-value">{value ?? '–'}</div>
-        <div className="stat-label">{label}</div>
-      </div>
-    </div>
   );
 }

@@ -26,15 +26,18 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.client.RestClientException;
 
 /**
  * Relay del outbox transaccional: envía al Producer los eventos PENDING y deja constancia del
  * resultado. No mantiene transacciones abiertas durante la llamada HTTP (el pool de SQLite es de
- * 1 conexión). Cada reintento reutiliza la misma Idempotency-Key, por lo que un evento ya aplicado
- * por el Producer no se duplica.
+ * 1 conexión); tras la respuesta, el estado del evento y la proyección del ítem se escriben en una
+ * única transacción. Cada reintento reutiliza la misma Idempotency-Key, por lo que un evento ya
+ * aplicado por el Producer no se duplica (p. ej. si el Consumer se reinicia tras enviarlo).
  */
 @Service
 public class SyncService {
@@ -50,13 +53,15 @@ public class SyncService {
     private final int maxRetries;
     private final long retryIntervalMs;
     private final ConflictPolicy conflictPolicy;
+    private final TransactionTemplate tx;
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
 
     public SyncService(ItemRepository repository, OutboxEventRepository outbox, ProducerWebhookClient client,
-                       ObjectMapper mapper, SyncMetrics metrics,
+                       ObjectMapper mapper, SyncMetrics metrics, PlatformTransactionManager txManager,
                        @Value("${app.sync.max-retries}") int maxRetries,
                        @Value("${app.sync.retry-interval-ms}") long retryIntervalMs,
                        @Value("${app.sync.conflict-policy:MANUAL}") ConflictPolicy conflictPolicy) {
+        this.tx = new TransactionTemplate(txManager);
         this.repository = repository;
         this.outbox = outbox;
         this.client = client;
@@ -137,18 +142,26 @@ public class SyncService {
 
         if (result.isSuccess() && result.body() != null) {
             metrics.success();
-            markSent(event);
-            if (event.getEventType() == EventType.DELETED) {
-                repository.deleteById(event.getItemId());
-            } else {
-                repository.save(ItemMapper.applyRemote(item, result.body()));
-            }
+            OutboxEvent sent = event;
+            // Evento SENT y proyección confirmada en la misma transacción: si el proceso cae a mitad,
+            // o se hace todo o nada (el evento sigue PENDING y se reenvía con la misma clave).
+            tx.executeWithoutResult(s -> {
+                markSent(sent);
+                if (sent.getEventType() == EventType.DELETED) {
+                    repository.deleteById(sent.getItemId());
+                } else {
+                    repository.save(ItemMapper.applyRemote(item, result.body()));
+                }
+            });
             log.info("Evento {} confirmado por el Producer ({})", event.getId(), event.getEventType());
         } else if (event.getEventType() == EventType.DELETED && result.status() == 404) {
             // Borrar lo que ya no existe es el estado deseado: el borrado es idempotente.
             metrics.success();
-            markSent(event);
-            repository.deleteById(event.getItemId());
+            OutboxEvent sent = event;
+            tx.executeWithoutResult(s -> {
+                markSent(sent);
+                repository.deleteById(sent.getItemId());
+            });
             log.info("Ítem {} ya no existía en el Producer; eliminado de la réplica", event.getItemId());
         } else if (result.status() == 409 && conflictPolicy != ConflictPolicy.MANUAL) {
             metrics.conflict();
@@ -168,15 +181,18 @@ public class SyncService {
     /** Resuelve un conflicto de versión según la política configurada. */
     private void resolveConflict(OutboxEvent event, Item item, WebhookPayload payload) {
         if (conflictPolicy == ConflictPolicy.PRODUCER_WINS) {
-            markSent(event);
-            if (item != null) {
-                Optional<ProducerItem> remote = client.fetch(event.getItemId());
-                if (remote.isEmpty()) {
-                    repository.deleteById(event.getItemId());
-                } else {
-                    repository.save(ItemMapper.applyRemote(item, remote.get()));
+            // La consulta HTTP va fuera de la transacción; la escritura, en una sola.
+            Optional<ProducerItem> remote = item == null ? Optional.empty() : client.fetch(event.getItemId());
+            tx.executeWithoutResult(s -> {
+                markSent(event);
+                if (item != null) {
+                    if (remote.isEmpty()) {
+                        repository.deleteById(event.getItemId());
+                    } else {
+                        repository.save(ItemMapper.applyRemote(item, remote.get()));
+                    }
                 }
-            }
+            });
             log.warn("Conflicto resuelto con PRODUCER_WINS para {}", event.getItemId());
             return;
         }
@@ -200,7 +216,7 @@ public class SyncService {
         event.setStatus(OutboxStatus.PENDING);
         event.setNextAttemptAt(Instant.now());
         event.setLastError("Rebasado sobre la versión " + remote.get().version() + " del Producer");
-        outbox.save(event);
+        tx.executeWithoutResult(s -> outbox.save(event));
         log.warn("Conflicto rebasado (CONSUMER_WINS) para {} sobre la versión {}", event.getItemId(),
                 remote.get().version());
     }
@@ -215,6 +231,10 @@ public class SyncService {
     }
 
     private void scheduleRetry(OutboxEvent event, Item item, String error) {
+        tx.executeWithoutResult(s -> doScheduleRetry(event, item, error));
+    }
+
+    private void doScheduleRetry(OutboxEvent event, Item item, String error) {
         int attempts = event.getAttempts() + 1;
         event.setAttempts(attempts);
         event.setLastError(error);
@@ -234,12 +254,15 @@ public class SyncService {
         mirrorItem(item, attempts, error, event.getNextRetryAt());
     }
 
+    /** Evento FAILED y estado del ítem en la misma transacción (queda registrado para reintento/auditoría). */
     private void fail(OutboxEvent event, Item item, String error) {
-        event.setStatus(OutboxStatus.FAILED);
-        event.setLastError(error);
-        event.setNextAttemptAt(null);
-        outbox.save(event);
-        mirrorItem(item, item == null ? 0 : item.getSyncAttempts(), error, null);
+        tx.executeWithoutResult(s -> {
+            event.setStatus(OutboxStatus.FAILED);
+            event.setLastError(error);
+            event.setNextAttemptAt(null);
+            outbox.save(event);
+            mirrorItem(item, item == null ? 0 : item.getSyncAttempts(), error, null);
+        });
         log.warn("Evento {} marcado FAILED: {}", event.getId(), error);
     }
 
