@@ -18,9 +18,10 @@ compila las imágenes y tarda unos minutos.
 
 ## Índice
 
-1. [Cumplimiento del enunciado](#1-cumplimiento-del-enunciado)
+1. [Cumplimiento del enunciado](#1-cumplimiento-del-enunciado) ·
+   [Priorización: núcleo y extras](#priorización-núcleo-del-enunciado-y-extras)
 2. [Puesta en marcha](#2-puesta-en-marcha)
-3. [Arquitectura](#3-arquitectura)
+3. [Arquitectura](#3-arquitectura) · [Varios canales y aplicaciones](#varios-canales-y-aplicaciones)
 4. [Modelo de información](#4-modelo-de-información)
 5. [Flujo de sincronización](#5-flujo-de-sincronización)
 6. [Qué ocurre si…](#6-qué-ocurre-si)
@@ -70,6 +71,35 @@ Funcionalidades opcionales implementadas, todas en §5 a §8:
 - UI con estados claros de sincronización.
 - Paginación, filtros y búsqueda.
 - Varios tipos de contenido (`PRODUCTO`, `SERVICIO`, `CONTENIDO`).
+
+### Priorización: núcleo del enunciado y extras
+
+El enunciado pide demostrar **criterio técnico**, no una plataforma de producción completa. El
+trabajo se ordenó en tres niveles, y cada nivel se cerró (con tests) antes de empezar el siguiente:
+
+1. **Núcleo obligatorio.** SSoT en el Producer, proyección en el Consumer, webhook autenticado e
+   idempotente, UI que solo habla con el Consumer, Bearer en ambas APIs, validación, errores sin
+   trazas, SQLite independiente por API y Docker Compose. Es lo que se evalúa como "flujo funcional".
+2. **Robustez de la sincronización.** Los cuatro escenarios que el enunciado exige definir (§6):
+   outbox transaccional, reintentos con backoff, control de versión y conflictos, eventos fuera de
+   orden y reconciliación. Sin esto, el núcleo funciona solo en el camino feliz.
+3. **Extras.** Cada uno se añadió porque resolvía un riesgo concreto detectado en la revisión, no por
+   completar una lista. La tabla indica qué aporta, cuánto cuesta y cómo prescindir de él:
+
+| Extra | Qué riesgo cubre | Coste | Cómo prescindir de él |
+|---|---|---|---|
+| **Keycloak (OIDC)** para los usuarios | Sin login, cualquiera que alcanzara la UI podía modificar el catálogo, y el token viajaba inyectado por un proxy. OIDC da identidad real sin tokens en el bundle. El enunciado no lo exige; se eligió frente a un token estático de usuario por ser la opción más segura sin programar gestión de usuarios. | +1 contenedor, ~1 min más de arranque | Sustituir el resource server del Consumer por un Bearer estático (el patrón ya existe en el Producer) y quitar el servicio `auth`. |
+| **Credenciales separadas** en el Producer | Con una sola credencial, el Consumer podía escribir en la SSoT saltándose el webhook. | Una variable más | — (es parte de la regla SSoT). |
+| **Copias de seguridad** del Producer | La SSoT era un único fichero SQLite sin copia. | Un volumen | `BACKUP_ENABLED=false`. |
+| **Rate limiting** en nginx | Abuso o bucles del cliente contra la API. | Ninguno apreciable | Subir `RATE_LIMIT_RATE`. |
+| **Métricas y registro de eventos** | Sin ellos, un fallo de sincronización solo se veía en los logs. | Un endpoint protegido | Ignorarlos: no afectan al flujo. |
+| **Smoke E2E, E2E de navegador y CI** | Verificar el enunciado sobre el stack real y no solo con mocks. | Tiempo de CI | Opcionales: no forman parte del arranque. |
+| **Sistema de diseño propio** | Estados de sincronización claros y usables en móvil, tablet y POS táctil. | CSS propio, sin dependencias | — |
+| **Endurecimiento de contenedores** | Mínimo privilegio (solo lectura, sin capabilities, límites de memoria). | Ninguno en ejecución | Quitar las claves `x-java-service` de `docker-compose.yml`. |
+
+**Se descartó por alcance** (ver §14): broker de mensajes, varios Consumers, migraciones
+versionadas, TLS, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
+aparece como evolución en §15.
 
 ## 2. Puesta en marcha
 
@@ -131,6 +161,23 @@ Producer y de Keycloak.
 
 **Volúmenes.** `producer-data` guarda la SSoT, `producer-backups` sus copias y `consumer-data` la
 proyección con el outbox.
+
+### Varios canales y aplicaciones
+
+El contexto del enunciado habla de un catálogo "utilizado por diferentes canales y aplicaciones",
+pero solo pide implementar **un** Consumer. El diseño no ata al Producer a ningún consumidor
+concreto: no conoce quién lo usa ni guarda estado por canal. Un canal nuevo se incorporaría así:
+
+| Tipo de canal | Cómo se integra hoy | Qué habría que añadir |
+|---|---|---|
+| **Solo lectura** (web pública, app móvil, buscador) | Lee la lista paginada o el detalle del Producer (`GET /api/items`), o se alimenta de la proyección de un Consumer. | Una credencial propia de solo lectura. Hoy el Producer reconoce dos credenciales (servicio y administración); añadir un rol por canal es un cambio acotado en `SecurityConfig`. |
+| **Con proyección propia y edición** (otro back-office, un TPV) | Replica el patrón del Consumer: su propia BD, outbox, webhook con `Idempotency-Key`, `baseVersion` y reconciliación. | Nada en el Producer: las claves de idempotencia son UUID únicos por intento y los conflictos entre canales se detectan por versión (409), igual que entre el Consumer y la administración directa. |
+
+**Limitación con varios canales:** un cambio aceptado por el Producer solo llega a los demás
+canales en su siguiente reconciliación (60 s por defecto o a demanda), porque el Producer no
+notifica a nadie. Con un canal es suficiente; con muchos, el paso natural es que el Producer
+publique eventos de dominio desde su propio outbox hacia un broker (Kafka, RabbitMQ) y que cada
+canal los aplique por versión, dejando la reconciliación como red de seguridad (§15).
 
 ## 4. Modelo de información
 
