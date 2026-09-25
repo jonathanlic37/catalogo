@@ -39,6 +39,10 @@
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
     </dependency>
     <dependency>
@@ -76,6 +80,19 @@
 
   <build>
     <finalName>app</finalName>
+    <!-- Los contratos Consumer↔Producer viven en ../contracts (fuente única compartida). -->
+    <testResources>
+      <testResource>
+        <directory>src/test/resources</directory>
+      </testResource>
+      <testResource>
+        <directory>${project.basedir}/../contracts</directory>
+        <targetPath>contracts</targetPath>
+        <includes>
+          <include>*.json</include>
+        </includes>
+      </testResource>
+    </testResources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>
