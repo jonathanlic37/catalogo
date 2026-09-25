@@ -10,6 +10,20 @@
   - `chore/...` mantenimiento
 - Se integra con **Pull Request** hacia `main` (squash merge) y se borra la rama.
 
+## Hook pre-push
+
+El repo incluye `scripts/hooks/pre-push`, que **rechaza el push directo a `main`/`master`**. Actívalo
+una vez por clon:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
+Para saltarlo de forma consciente (p. ej. una emergencia): `ALLOW_PUSH_MAIN=1 git push origin main`.
+
+> La protección de rama del lado del servidor (branch protection / rulesets) exige GitHub Pro en
+> repos privados; con este hook la convención queda aplicada en local.
+
 ## Commits
 
 - Asunto imperativo y concreto (`fix(webhook): ...`, `feat(outbox): ...`).

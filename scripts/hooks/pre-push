@@ -1,0 +1,26 @@
+#!/bin/sh
+# Bloquea el push directo a las ramas protegidas (main/master).
+# Los cambios van en una rama corta y se integran con Pull Request.
+#
+# Instalación (una vez por clon):
+#   git config core.hooksPath scripts/hooks
+# Override puntual y consciente:
+#   ALLOW_PUSH_MAIN=1 git push origin main
+
+protected="refs/heads/main refs/heads/master"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    for p in $protected; do
+        if [ "$remote_ref" = "$p" ]; then
+            if [ "${ALLOW_PUSH_MAIN:-0}" = "1" ]; then
+                continue
+            fi
+            echo "ERROR: push directo a $remote_ref bloqueado." >&2
+            echo "       Crea una rama y abre un Pull Request (ver CONTRIBUTING.md)." >&2
+            echo "       Override: ALLOW_PUSH_MAIN=1 git push origin ${remote_ref#refs/heads/}" >&2
+            exit 1
+        fi
+    done
+done
+
+exit 0
