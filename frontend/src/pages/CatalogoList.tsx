@@ -8,8 +8,8 @@ import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SyncBadge } from '../components/SyncBadge';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
-import { useDeleteItem, useItemsPage, useResyncItem, useRetryItem, useSummary } from '../hooks/useItems';
-import type { Estado, Item } from '../types/item';
+import { useDeleteItem, useItemsPage, useReconcile, useResyncItem, useRetryItem, useSummary } from '../hooks/useItems';
+import type { Estado, Item, TipoContenido } from '../types/item';
 
 const dateFormat = new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' });
 const PAGE_SIZE = 25;
@@ -23,6 +23,12 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: 'INACTIVO', label: 'Inactivos' },
 ];
 
+const TIPO_LABEL: Record<TipoContenido, string> = {
+  PRODUCTO: 'Producto',
+  SERVICIO: 'Servicio',
+  CONTENIDO: 'Contenido',
+};
+
 export function CatalogoList() {
   const [search, setSearch] = useState('');
   const [estado, setEstado] = useState<Filter>('');
@@ -35,6 +41,7 @@ export function CatalogoList() {
   const remove = useDeleteItem();
   const retry = useRetryItem();
   const resync = useResyncItem();
+  const sync = useReconcile();
 
   const items = list.data?.content ?? [];
   const totalElements = list.data?.totalElements ?? 0;
@@ -67,9 +74,20 @@ export function CatalogoList() {
           <h1>Catálogo</h1>
           <p>Gestiona tus ítems; cada cambio se confirma con la fuente de verdad.</p>
         </div>
-        <Link className="btn btn-primary" to="/nuevo">
-          <Plus size={18} aria-hidden="true" /> Nuevo ítem
-        </Link>
+        <div className="page-actions">
+          <button
+            className="btn"
+            type="button"
+            onClick={() => sync.mutate()}
+            disabled={sync.isPending}
+            title="Traer ahora los cambios hechos en la fuente de verdad"
+          >
+            <RefreshCw size={18} aria-hidden="true" /> {sync.isPending ? 'Sincronizando…' : 'Sincronizar ahora'}
+          </button>
+          <Link className="btn btn-primary" to="/nuevo">
+            <Plus size={18} aria-hidden="true" /> Nuevo ítem
+          </Link>
+        </div>
       </div>
 
       <div className="stats" aria-label="Resumen del catálogo">
@@ -88,6 +106,17 @@ export function CatalogoList() {
       {mutationError && (
         <div className="alert" role="alert">
           <AlertTriangle size={18} aria-hidden="true" /> {mutationError.message}
+        </div>
+      )}
+      {sync.isSuccess && (
+        <div className="hint" role="status">
+          Reconciliación completada: {sync.data.created} nuevos, {sync.data.updated} actualizados,{' '}
+          {sync.data.deleted} eliminados.
+        </div>
+      )}
+      {sync.isError && (
+        <div className="alert" role="alert">
+          <AlertTriangle size={18} aria-hidden="true" /> {sync.error.message}
         </div>
       )}
 
@@ -154,6 +183,7 @@ export function CatalogoList() {
                 <th scope="col">Nombre</th>
                 <th scope="col">Descripción</th>
                 <th scope="col">Estado</th>
+                <th scope="col">Tipo</th>
                 <th scope="col">Actualizado</th>
                 <th scope="col">Sincronización</th>
                 <th scope="col">
@@ -176,6 +206,7 @@ export function CatalogoList() {
                       {item.estado === 'ACTIVO' ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
+                  <td data-label="Tipo">{TIPO_LABEL[item.tipo] ?? '—'}</td>
                   <td className="cell-date" data-label="Actualizado">
                     {dateFormat.format(new Date(item.fechaActualizacion))}
                   </td>

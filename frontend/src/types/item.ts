@@ -41,6 +41,12 @@ export interface Summary {
   fallidos: number;
 }
 
+export interface ReconcileResult {
+  created: number;
+  updated: number;
+  deleted: number;
+}
+
 export interface ListParams {
   page: number;
   size: number;

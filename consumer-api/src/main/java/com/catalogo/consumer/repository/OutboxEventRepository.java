@@ -16,5 +16,7 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, String
 
     void deleteByItemId(String itemId);
 
+    long deleteByStatusAndSentAtBefore(OutboxStatus status, Instant before);
+
     long countByStatus(OutboxStatus status);
 }

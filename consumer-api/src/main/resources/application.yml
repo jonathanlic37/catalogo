@@ -66,3 +66,5 @@ app:
     # MANUAL | PRODUCER_WINS | CONSUMER_WINS
     conflict-policy: ${SYNC_CONFLICT_POLICY:MANUAL}
     metrics-interval-ms: ${SYNC_METRICS_INTERVAL_MS:15000}
+    # Retención de eventos SENT del outbox (los FAILED se conservan para reintento/auditoría).
+    outbox-retention-days: ${SYNC_OUTBOX_RETENTION_DAYS:7}

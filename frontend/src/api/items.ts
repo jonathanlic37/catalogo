@@ -1,5 +1,5 @@
 // frontend/src/api/items.ts
-import type { Item, ItemInput, ListParams, Page, Summary } from '../types/item';
+import type { Item, ItemInput, ListParams, Page, ReconcileResult, Summary } from '../types/item';
 import { request } from './client';
 
 export const fetchItemsPage = async ({ page, size, q, estado }: ListParams): Promise<Page<Item>> => {
@@ -27,3 +27,6 @@ export const retryItem = async (id: string): Promise<Item> =>
 
 export const resyncItem = async (id: string): Promise<Item | undefined> =>
   request<Item>(`/items/${id}/resync`, { method: 'POST' });
+
+export const reconcileNow = async (): Promise<ReconcileResult> =>
+  (await request<ReconcileResult>('/reconcile', { method: 'POST' }))!;

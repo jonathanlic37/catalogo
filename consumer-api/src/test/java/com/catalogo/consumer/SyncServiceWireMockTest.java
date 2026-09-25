@@ -19,6 +19,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.catalogo.consumer.maintenance.OutboxPurger;
+import com.catalogo.consumer.model.EventType;
+import com.catalogo.consumer.model.OutboxEvent;
+import com.catalogo.consumer.model.OutboxStatus;
+import com.catalogo.consumer.repository.OutboxEventRepository;
 import com.catalogo.consumer.security.TokenValidator;
 import com.catalogo.consumer.sync.ReconcileService;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -31,6 +36,8 @@ import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -85,6 +92,8 @@ class SyncServiceWireMockTest {
 
     @Autowired MockMvc mvc;
     @Autowired ReconcileService reconcile;
+    @Autowired OutboxEventRepository outbox;
+    @Autowired OutboxPurger purger;
 
     @BeforeEach
     void reset() {
@@ -380,6 +389,46 @@ class SyncServiceWireMockTest {
             }
         });
         return result;
+    }
+
+    @Test
+    void reconciliacionManualDevuelveResumenYExigeToken() throws Exception {
+        String seeded = "seed-" + UUID.randomUUID();
+        producer.stubFor(WireMock.get(urlPathEqualTo("/api/items")).willReturn(aResponse()
+                .withHeader("Content-Type", "application/json")
+                .withBody(("{\"content\":[{\"id\":\"%s\",\"nombre\":\"Sembrado\",\"estado\":\"ACTIVO\",\"version\":5,"
+                        + "\"fechaCreacion\":\"2026-01-01T00:00:00Z\",\"fechaActualizacion\":\"2026-01-01T00:00:00Z\"}],"
+                        + "\"page\":0,\"size\":500,\"totalElements\":1,\"totalPages\":1,\"last\":true}")
+                        .formatted(seeded))));
+
+        mvc.perform(post("/api/reconcile").header("Authorization", "Bearer " + FRONT_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.created").value(1));
+
+        mvc.perform(get("/api/items/" + seeded).header("Authorization", "Bearer " + FRONT_TOKEN))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.syncStatus").value("CONFIRMED"));
+
+        mvc.perform(post("/api/reconcile")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void purgaSoloEventosSentAntiguos() {
+        OutboxEvent old = new OutboxEvent("purga-" + UUID.randomUUID(), "item-x", EventType.CREATED, "{}",
+                Instant.now().minus(30, ChronoUnit.DAYS));
+        old.setStatus(OutboxStatus.SENT);
+        old.setSentAt(Instant.now().minus(30, ChronoUnit.DAYS));
+        outbox.save(old);
+
+        OutboxEvent recent = new OutboxEvent("keep-" + UUID.randomUUID(), "item-y", EventType.CREATED, "{}",
+                Instant.now());
+        recent.setStatus(OutboxStatus.SENT);
+        recent.setSentAt(Instant.now());
+        outbox.save(recent);
+
+        assertThat(purger.purge()).isGreaterThanOrEqualTo(1);
+        assertThat(outbox.existsById(old.getId())).isFalse();
+        assertThat(outbox.existsById(recent.getId())).isTrue();
     }
 
     @Test

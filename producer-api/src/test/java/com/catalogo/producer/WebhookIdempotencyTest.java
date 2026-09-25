@@ -22,6 +22,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Set;
@@ -212,6 +216,22 @@ class WebhookIdempotencyTest {
 
         try (Stream<Path> files = Files.list(tmp.resolve("backups"))) {
             assertThat(files.count()).as("app.backup.keep=2").isEqualTo(2);
+        }
+    }
+
+    @Test
+    void elBackupEsUnaCopiaSqliteLegibleConLosDatos() throws Exception {
+        String id = UUID.randomUUID().toString();
+        webhook(key(), "CREATED", body(id, "Respaldo")).andExpect(status().isCreated());
+
+        Path backup = backups.backup();
+        try (Connection c = DriverManager.getConnection("jdbc:sqlite:" + backup);
+             PreparedStatement ps = c.prepareStatement("select count(*) from items where id = ?")) {
+            ps.setString(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
         }
     }
 

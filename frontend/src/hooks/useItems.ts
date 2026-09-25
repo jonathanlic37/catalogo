@@ -1,6 +1,6 @@
 // frontend/src/hooks/useItems.ts
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createItem, deleteItem, fetchItem, fetchItemsPage, fetchSummary, resyncItem, retryItem, updateItem } from '../api/items';
+import { createItem, deleteItem, fetchItem, fetchItemsPage, fetchSummary, reconcileNow, resyncItem, retryItem, updateItem } from '../api/items';
 import type { Item, ItemInput, ListParams, Page } from '../types/item';
 
 const POLL_MS = 1500;
@@ -92,6 +92,15 @@ export function useResyncItem() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: resyncItem,
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
+  });
+}
+
+/** Fuerza una reconciliación con el Producer (útil para ver al instante datos creados allí). */
+export function useReconcile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: reconcileNow,
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.all }),
   });
 }

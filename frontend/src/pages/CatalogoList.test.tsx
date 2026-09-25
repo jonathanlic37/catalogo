@@ -92,6 +92,20 @@ describe('CatalogoList', () => {
     expect(await screen.findByLabelText('Descartar cambio de Roto2')).toBeInTheDocument();
   });
 
+  it('permite forzar la reconciliación con el Producer y muestra el resumen', async () => {
+    const fetchMock = mockFetch((method, url) => {
+      if (url.startsWith('/api/items/summary')) return summary({ total: 1 });
+      if (method === 'POST' && url === '/api/reconcile') return { created: 2, updated: 1, deleted: 0 };
+      return page([item({ id: 'r', nombre: 'Recién llegado' })]);
+    });
+    render();
+
+    await userEvent.click(await screen.findByRole('button', { name: /Sincronizar ahora/ }));
+
+    expect(await screen.findByText(/2 nuevos, 1 actualizados, 0 eliminados/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([u, i]) => String(u) === '/api/reconcile' && i?.method === 'POST')).toBe(true);
+  });
+
   it('pide confirmación antes de eliminar y solo entonces llama a la API', async () => {
     const fetchMock = mockFetch((method, url) => {
       if (url.startsWith('/api/items/summary')) return summary({ total: 1 });

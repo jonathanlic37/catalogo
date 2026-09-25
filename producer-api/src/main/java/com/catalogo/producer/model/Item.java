@@ -28,9 +28,13 @@ public class Item {
     @Column(nullable = false, length = 20)
     private Estado estado;
 
-    /** Tipo de elemento de catálogo (producto, servicio, contenido...). */
+    /**
+     * Tipo de elemento de catálogo (producto, servicio, contenido...). Nullable a nivel de columna
+     * para que {@code ddl-auto=update} pueda añadirla a una BD existente (SQLite no admite añadir
+     * una columna NOT NULL sin default); el código siempre la asigna y la trata como PRODUCTO si falta.
+     */
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 20)
+    @Column(length = 20)
     private TipoContenido tipo;
 
     /** Marca del último evento aplicado; los eventos con occurredAt anterior se descartan. */
