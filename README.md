@@ -422,26 +422,68 @@ el smoke y el E2E de navegador tras `cp .env.example .env && docker compose up -
 
 ## 12. Decisiones técnicas y trade-offs
 
-| Decisión | Alternativa descartada | Por qué / trade-off |
-|---|---|---|
-| **Outbox transaccional** en el Consumer | Llamar al Producer dentro de la petición del usuario | La UI responde al instante (202) y el cambio sobrevive a caídas y reinicios. A cambio, hay consistencia eventual y la UI debe mostrar estados intermedios. |
-| **Idempotency-Key + hash** en el Producer | Deduplicar por id del ítem o por fechas | La clave identifica el *intento*, no el ítem. Permite reintentos seguros y detecta la reutilización indebida de una clave. |
-| **Concurrencia optimista por versión** | Last-write-wins por timestamp | No depende de relojes y no pierde cambios en silencio: el conflicto se ve y se decide. |
-| **Edición bloqueada con un cambio pendiente** | Encolar varias ediciones del mismo ítem | Garantiza que una clave nunca cambia de contenido y simplifica el razonamiento. A cambio, el usuario espera 1 o 2 s entre ediciones del mismo ítem. |
-| **Reconciliación periódica** (pull) para cambios del Producer | Webhook Producer → Consumer (push) | Un solo sentido de dependencia y el Producer no conoce a sus consumidores. A cambio, los cambios hechos en el Producer tardan hasta 60 s (o un clic) en verse. |
-| **HTTP fuera de transacción** y confirmación atómica después | Transacción que envuelva la llamada | SQLite admite un solo escritor, y bloquearlo durante un timeout degradaría todo. |
-| **OIDC para usuarios y token estático entre servicios** | OAuth también entre servicios (client credentials) | Proporcional al alcance: el tramo máquina a máquina es interno. |
-| **SQLite + `ddl-auto=update`** | Flyway/Liquibase | Lo pide el enunciado y reduce piezas. Migrar a esquemas versionados es el primer paso para producción. |
-| **nginx como proxy del SPA** | CORS directo del navegador al Consumer | Mismo origen, CSP estricta, rate limit y límite de cuerpo en un solo punto. |
+Registro de las decisiones de diseño, con la alternativa que se descartó y lo que se gana y se paga
+con cada una. Las que tienen más contexto enlazan a su sección.
+
+**Sincronización e integridad**
+
+| # | Decisión | Alternativa descartada | Por qué / trade-off |
+|---|---|---|---|
+| D-01 | **Outbox transaccional** en el Consumer | Llamar al Producer dentro de la petición del usuario | El cambio y su evento se guardan juntos: sobrevive a caídas y reinicios. A cambio, consistencia eventual. |
+| D-02 | **Escrituras con `202 Accepted`** (asíncronas) | Esperar al Producer y devolver `200` | La UI responde al instante y funciona con el Producer caído. A cambio, la UI debe mostrar el estado «pendiente» ([§5](#5-flujo-de-sincronización)). |
+| D-03 | **Idempotency-Key + hash del contenido** en el Producer | Deduplicar por id del ítem o por fechas | La clave identifica el *intento*, no el ítem: reintentos seguros y detección de claves reutilizadas con otro contenido. |
+| D-04 | **Concurrencia optimista por versión** (`baseVersion`) | Last-write-wins por timestamp | No depende de relojes y no pierde cambios en silencio: el conflicto se detecta (409) y se decide. |
+| D-05 | **Política de conflicto `MANUAL` por defecto** | `PRODUCER_WINS` o `CONSUMER_WINS` por defecto | Ninguna edición se pierde ni se impone sin que el usuario lo sepa. A cambio, requiere su acción; las otras dos políticas son configurables (`SYNC_CONFLICT_POLICY`). |
+| D-06 | **Reintento sin límite de los fallos transitorios** (backoff, tope 5 min) | Dar el evento por fallido tras N intentos | Una caída larga del Producer se recupera sola, sin reintentar ítem por ítem. A cambio, si el Producer no vuelve nunca, los pendientes se acumulan (visibles en métricas y en *Sincronización*). Solo los rechazos (4xx) son definitivos. |
+| D-07 | **Edición bloqueada mientras hay un cambio pendiente** | Encolar varias ediciones del mismo ítem | Una clave de idempotencia nunca cambia de contenido y el razonamiento es simple. A cambio, el usuario espera 1–2 s entre ediciones del mismo ítem. |
+| D-08 | **HTTP fuera de transacción** y confirmación atómica después | Una transacción que envuelva la llamada al Producer | SQLite admite un solo escritor: bloquearlo durante un timeout degradaría todo. La confirmación (evento `SENT` + proyección) sigue siendo atómica. |
+| D-09 | **Reconciliación periódica** (pull) para los cambios del Producer | Notificación Producer → Consumer (push) | Un solo sentido de dependencia: el Producer no conoce a sus consumidores. A cambio, sus cambios tardan hasta 60 s (o un clic) en verse ([§3](#varios-canales-y-aplicaciones)). |
+| D-10 | **El id de un alta lo genera el Consumer** (UUID) y el Producer lo valida | Id asignado siempre por el Producer | Misma identidad en ambas BD y reintentos idempotentes sin remapear ids ([§4](#cómo-se-cumple-la-regla-ssot)). |
+| D-11 | **Borrado físico** en la fuente de verdad | Borrado lógico (marca `eliminado`) | Simple y fiel a «eliminar». A cambio, no hay papelera ni historial; el borrado lógico figura como evolución (§15). |
+
+**Seguridad**
+
+| # | Decisión | Alternativa descartada | Por qué / trade-off |
+|---|---|---|---|
+| D-12 | **OIDC (Keycloak) para usuarios; tokens estáticos entre servicios** | Token estático también para usuarios, o OAuth *client credentials* entre servicios | Identidad real sin tokens en el bundle; el tramo máquina a máquina es interno. Keycloak es un extra: su coste y cómo prescindir de él están en la [priorización](#priorización-núcleo-del-enunciado-y-extras) y en [§8](#8-seguridad-y-estrategia-de-autenticación). |
+| D-13 | **Dos credenciales en el Producer** (servicio y administración) | Un único token para todo | El Consumer no puede escribir en la SSoT saltándose el webhook (403). A cambio, una variable más. |
+
+**Datos, API e interfaz**
+
+| # | Decisión | Alternativa descartada | Por qué / trade-off |
+|---|---|---|---|
+| D-14 | **SQLite + `ddl-auto=update`** | Migraciones versionadas (Flyway/Liquibase) | Lo pide el enunciado y reduce piezas. Migrar a esquemas versionados es el primer paso hacia producción. |
+| D-15 | **Paginación, búsqueda y filtros en el servidor** | Traer todo el catálogo y filtrar en el navegador | Coste constante por pantalla: con 1.500 ítems, de 178 ms / 595 KB a 32 ms / 1,1 KB ([auditoría](docs/AUDITORIA.md)). A cambio, una petición por cambio de filtro (amortiguada con 300 ms de retardo). |
+| D-16 | **nginx como proxy del SPA** | CORS directo del navegador al Consumer | Mismo origen, CSP estricta, límite de peticiones y de tamaño en un solo punto. |
+| D-17 | **CSS propio con design tokens, sin librería de componentes** | MUI, Tailwind, shadcn… | Control total del sistema visual, bundle ligero y sin dependencias de UI. A cambio, los componentes se mantienen a mano. |
 
 ## 13. Supuestos
 
-- Hay **un** Consumer; el diseño admite varios (§15).
-- El catálogo tiene decenas de miles de ítems como mucho (SQLite, reconciliación completa).
-- Los relojes de los contenedores están sincronizados. Solo afectan a eventos sin versión.
-- La UI se usa en local. Para exponerla se pondría detrás de un proxy TLS (`FRONTEND_BIND`).
-- «Producer crea información» significa su API REST de administración, protegida con su propio
-  token de administración.
+Donde el enunciado no concreta, se asumió lo siguiente. Cambiar un supuesto tiene la consecuencia
+indicada.
+
+**De negocio**
+
+| Supuesto | Consecuencia en la solución |
+|---|---|
+| «Modificar desde el frontend» incluye **crear, editar y eliminar**. | Las tres operaciones viajan por el mismo webhook (`CREATED`, `UPDATED`, `DELETED`). |
+| `estado` (`ACTIVO`/`INACTIVO`) es un **atributo del ítem**, no una baja. | Un ítem inactivo sigue visible y editable; se puede filtrar por estado. Eliminar es otra operación. |
+| El **nombre no es único**. | Se permiten dos ítems con el mismo nombre; la identidad es el `id`. |
+| Todos los usuarios autenticados pueden **editar cualquier ítem**; no hay propiedad por usuario. | Un solo rol de negocio (`user`); `admin` solo añade acceso a métricas. |
+| Se acepta **consistencia eventual de segundos** entre la UI y la fuente de verdad. | Los cambios se muestran como «pendientes» hasta que el Producer los confirma (D-02). |
+| «Producer crea información» significa su **API REST de administración**. | La creación en el Producer se hace con curl o Postman; el enunciado solo pide interfaz para el Consumer. |
+| La interfaz es **solo en español**. | Textos de la UI y del login de Keycloak en español, sin internacionalización. |
+
+**Técnicos**
+
+| Supuesto | Consecuencia en la solución |
+|---|---|
+| Hay **un** Consumer. | El diseño admite más ([§3](#varios-canales-y-aplicaciones)); con varios, los cambios del Producer les llegan por reconciliación. |
+| El catálogo tiene **decenas de miles de ítems** como mucho. | SQLite y reconciliación completa cada 60 s son suficientes. |
+| Las fechas se guardan en **UTC** y se intercambian en **ISO-8601**. | La UI las muestra en la zona horaria del navegador. |
+| Los relojes de los contenedores están **sincronizados**. | Solo afecta a eventos sin versión (D-04 no depende de relojes). |
+| Se ejecuta **en local**, sin TLS. | Todos los puertos en `127.0.0.1`; para exponerlo, un proxy con TLS delante (`FRONTEND_BIND`, §15). |
+| Navegador **moderno** (con `backdrop-filter` y `<dialog>`). | En navegadores sin desenfoque, las superficies se vuelven más opacas y el contenido sigue siendo legible. |
 
 ## 14. Limitaciones conocidas y lo que no se implementó
 
