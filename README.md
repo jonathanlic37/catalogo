@@ -395,6 +395,18 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las pri
 | `IDEMPOTENCY_RETENTION_DAYS`, `BACKUP_*` | Mantenimiento del Producer. |
 | `RATE_LIMIT_RATE`, `RATE_LIMIT_BURST` | Límite de peticiones por IP en nginx (responde 429). |
 
+### Qué se versiona y qué no
+
+- **No se versiona** (`.gitignore`): `.env`, las bases SQLite (`*.db`, `*.db-wal`, `*.db-shm`), ni
+  dependencias o artefactos generados (`node_modules/`, `target/`, `dist/`, resultados de E2E). El
+  historial del repositorio nunca ha contenido un `.env`.
+- **Secretos:** ninguno real. `.env.example` solo trae valores de ejemplo `dev-only-…` (las APIs los
+  aceptan en local con un aviso y exigen sustituirlos fuera de él), el realm de Keycloak solo tiene
+  placeholders `${…}` y los tokens que aparecen en los tests son valores ficticios de prueba.
+- **Sí se versionan:** los lockfiles (`package-lock.json`), para builds reproducibles, y las fuentes
+  del tema de login (Outfit y Work Sans, licencia SIL OFL 1.1, con su texto de licencia junto a los
+  ficheros).
+
 ## 10. Probar el sistema
 
 **Desde la interfaz.** Recorrido del flujo completo:
