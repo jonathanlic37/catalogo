@@ -181,21 +181,49 @@ canal los aplique por versión, dejando la reconciliación como red de seguridad
 
 ## 4. Modelo de información
 
-Entidad principal: el **ítem de catálogo**.
+Entidad principal: el **ítem de catálogo**. Tiene los seis campos que pide el enunciado y dos
+ampliaciones, y es la misma en ambas APIs.
 
-| Campo | Requerido por el enunciado | Motivo |
-|---|---|---|
-| `id` (UUID) | ✔ identificador | El Consumer lo genera en las altas y el Producer lo respeta, así la identidad es la misma en ambas BD. En las altas directas lo asigna el Producer. |
-| `nombre` (≤120) | ✔ nombre/título | |
-| `descripcion` (≤1000) | ✔ descripción | |
-| `estado` (`ACTIVO`/`INACTIVO`) | ✔ estado | |
-| `fechaCreacion`, `fechaActualizacion` | ✔ fechas | Las fija el Producer: son canónicas. |
-| `version` | ampliación | Concurrencia optimista y detección de conflictos. |
-| `tipo` (`PRODUCTO`/`SERVICIO`/`CONTENIDO`) | ampliación | Varios tipos de contenido sin cambiar el esquema; los atributos propios de cada tipo son una evolución prevista (§15). |
+| Campo | Enunciado | Obligatorio | Quién lo fija | Motivo |
+|---|---|---|---|---|
+| `id` (UUID) | ✔ identificador | Sí | El Consumer en las altas desde la UI (el Producer lo valida); el Producer en sus altas directas | Misma identidad en ambas BD ([D-10](#12-decisiones-técnicas-y-trade-offs)). |
+| `nombre` | ✔ nombre/título | Sí (≤ 120) | Usuario | No es único: la identidad es el `id`. |
+| `descripcion` | ✔ descripción | No (≤ 1000) | Usuario | Opcional: no todos los ítems la necesitan. |
+| `estado` | ✔ estado | Sí | Usuario | `ACTIVO` / `INACTIVO`: atributo del ítem, no una baja (ver abajo). |
+| `fechaCreacion` | ✔ fecha de creación | — | Producer | Canónica. Se fija al aceptar el alta; no cambia. |
+| `fechaActualizacion` | ✔ fecha de actualización | — | Producer | Canónica. Se actualiza con cada cambio aceptado. |
+| `version` | ampliación | — | Producer | Empieza en 1 y sube con cada cambio aceptado. Es la base del control de concurrencia y de la detección de conflictos ([D-04](#12-decisiones-técnicas-y-trade-offs)). |
+| `tipo` | ampliación | No (por defecto `PRODUCTO`) | Usuario | `PRODUCTO` / `SERVICIO` / `CONTENIDO`: cubre «productos, contenidos, servicios u otro tipo» del enunciado sin cambiar el esquema. Añadir un tipo es añadir un valor al enum en ambas APIs. |
 
-Además, la proyección del Consumer guarda el estado de sincronización de cada ítem:
-`syncStatus` (`PENDING`/`CONFIRMED`/`FAILED`), la operación pendiente y el último error. El
-Producer guarda `lastEventAt` para ordenar los eventos que no traen versión.
+Las fechas se guardan en UTC y viajan en ISO-8601. Mientras un cambio está pendiente, la UI muestra
+los valores locales; al confirmarse se sustituyen por los del Producer, fechas y versión incluidas.
+
+**Por qué solo dos estados.** El enunciado pide un estado pero no define su ciclo de vida.
+`ACTIVO`/`INACTIVO` cubre el caso habitual (mostrar u ocultar un ítem en los canales) sin inventar
+reglas de negocio. Un ciclo editorial (`BORRADOR` → `PUBLICADO` → `ARCHIVADO`) cabría en el mismo
+campo si el negocio lo requiriera.
+
+**Datos de dominio frente a metadatos técnicos.** Solo los ocho campos de arriba son el modelo de
+negocio. El Producer devuelve los ocho como estado canónico; el webhook envía solo los que decide el
+usuario (`id`, `nombre`, `descripcion`, `estado`, `tipo`) más `baseVersion` (versión en la que se
+basó el cambio) y `occurredAt` (cuándo ocurrió), porque fechas y versión las fija el Producer. Ver
+`contracts/`. El resto son metadatos de la sincronización:
+
+| Dónde | Campo | ¿Se expone en la API? | Para qué |
+|---|---|---|---|
+| Consumer | `syncStatus` | Sí | `PENDING` / `CONFIRMED` / `FAILED`: lo que la UI muestra como estado de sincronización. |
+| Consumer | `pendingEvent` (en la API, `pendingOperation`) | Sí | Operación aún no confirmada: alta, edición o eliminación. |
+| Consumer | `lastSyncError`, `syncAttempts` (en la API, `syncError`, `syncAttempts`) | Sí | Motivo e intentos del último envío, también mientras se reintenta. |
+| Consumer | `failureReason` | Sí, solo en `FAILED` | `CONFLICT`, `GONE` o `REJECTED`: decide qué acciones ofrece la UI. |
+| Consumer | `idempotencyKey`, `nextRetryAt` | No | Clave del envío en curso y momento del próximo reintento. |
+| Consumer | tabla `outbox_events` | Solo el registro (`GET /api/sync/events`) | Eventos pendientes, enviados y fallidos. |
+| Producer | `lastEventAt` | No | Ordena los eventos que no traen versión (eventos fuera de orden). |
+| Producer | tabla `idempotency_records` | No | Respuesta guardada de cada `Idempotency-Key`. |
+
+**Qué se decidió no añadir.** Precio, stock, categorías, imágenes o atributos específicos por tipo
+de contenido. Ninguno es necesario para demostrar la sincronización, y cada uno arrastraría reglas
+de negocio y validaciones que el enunciado no define. Los atributos por tipo están previstos como
+evolución (un campo `attributes` validado por esquema según `tipo`, §15).
 
 ### Cómo se cumple la regla SSoT
 
