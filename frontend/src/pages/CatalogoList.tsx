@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { SyncBadge } from '../components/SyncBadge';
+import { StatCard } from '../components/ui/StatCard';
+import { StatusPill } from '../components/ui/StatusPill';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useDeleteItem, useItemsPage, useReconcile, useResyncItem, useRetryItem, useSummary } from '../hooks/useItems';
 import type { Estado, Item, SyncStatus, TipoContenido } from '../types/item';
@@ -102,9 +104,9 @@ export function CatalogoList() {
       </div>
 
       <div className="stats" aria-label="Resumen del catálogo">
-        <Stat icon={<Layers size={20} />} tone="total" value={summary.data?.total} label="Total de ítems" />
-        <Stat icon={<CheckCircle2 size={20} />} tone="ok" value={summary.data?.activos} label="Activos" />
-        <Stat
+        <StatCard icon={<Layers size={20} />} tone="total" value={summary.data?.total} label="Total de ítems" />
+        <StatCard icon={<CheckCircle2 size={20} />} tone="ok" value={summary.data?.activos} label="Activos" />
+        <StatCard
           icon={<Clock size={20} />}
           tone="warn"
           value={summary.data?.pendientes}
@@ -112,9 +114,9 @@ export function CatalogoList() {
           active={syncFilter === 'PENDING'}
           onClick={() => setSyncFilter(syncFilter === 'PENDING' ? '' : 'PENDING')}
         />
-        <Stat
+        <StatCard
           icon={<AlertTriangle size={20} />}
-          tone="fail"
+          tone="danger"
           value={summary.data?.fallidos}
           label="Con error"
           active={syncFilter === 'FAILED'}
@@ -246,10 +248,10 @@ export function CatalogoList() {
                     {item.descripcion || '—'}
                   </td>
                   <td data-label="Estado">
-                    <span className={item.estado === 'ACTIVO' ? 'pill pill-on' : 'pill pill-off'}>
-                      <span className="dot" aria-hidden="true" />
-                      {item.estado === 'ACTIVO' ? 'Activo' : 'Inactivo'}
-                    </span>
+                    <StatusPill
+                      tone={item.estado === 'ACTIVO' ? 'ok' : 'muted'}
+                      label={item.estado === 'ACTIVO' ? 'Activo' : 'Inactivo'}
+                    />
                   </td>
                   <td data-label="Tipo">{TIPO_LABEL[item.tipo] ?? '—'}</td>
                   <td className="cell-date" data-label="Actualizado">
@@ -349,41 +351,5 @@ export function CatalogoList() {
         onCancel={() => setConfirm(null)}
       />
     </section>
-  );
-}
-
-interface StatProps {
-  icon: React.ReactNode;
-  tone: string;
-  value?: number;
-  label: string;
-  /** Si se indica, la tarjeta actúa como atajo de filtro. */
-  onClick?: () => void;
-  active?: boolean;
-}
-
-function Stat({ icon, tone, value, label, onClick, active }: StatProps) {
-  const content = (
-    <>
-      <div className={`stat-icon tone-${tone}`} aria-hidden="true">
-        {icon}
-      </div>
-      <div>
-        <div className="stat-value">{value ?? '–'}</div>
-        <div className="stat-label">{label}</div>
-      </div>
-    </>
-  );
-  if (!onClick) return <div className="stat">{content}</div>;
-  return (
-    <button
-      type="button"
-      className={active ? 'stat stat-button active' : 'stat stat-button'}
-      onClick={onClick}
-      aria-pressed={active}
-      title={active ? 'Quitar filtro' : `Ver solo: ${label.toLowerCase()}`}
-    >
-      {content}
-    </button>
   );
 }
