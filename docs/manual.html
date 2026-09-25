@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Catálogo · Manual de uso</title>
+<!-- docs/manual.html — manual básico autocontenido (sin recursos externos). Ábrelo con doble clic. -->
+<style>
+  @font-face { font-family: 'Outfit'; font-weight: 500; font-display: swap; src: url('../auth/themes/catalogo/login/resources/fonts/outfit-500.woff2') format('woff2'); }
+  @font-face { font-family: 'Outfit'; font-weight: 600; font-display: swap; src: url('../auth/themes/catalogo/login/resources/fonts/outfit-600.woff2') format('woff2'); }
+  @font-face { font-family: 'Work Sans'; font-weight: 400; font-display: swap; src: url('../auth/themes/catalogo/login/resources/fonts/work-sans-400.woff2') format('woff2'); }
+  @font-face { font-family: 'Work Sans'; font-weight: 500; font-display: swap; src: url('../auth/themes/catalogo/login/resources/fonts/work-sans-500.woff2') format('woff2'); }
+  @font-face { font-family: 'Work Sans'; font-weight: 600; font-display: swap; src: url('../auth/themes/catalogo/login/resources/fonts/work-sans-600.woff2') format('woff2'); }
+
+  /* Tokens «DAKA Glass»: los mismos que la aplicación (frontend/src/styles.css). Claro por defecto. */
+  :root {
+    --bg: #F4F6F9; --fg: #001F4F; --muted: #4A5B78; --subtle: #64748B;
+    --glass: rgba(255,255,255,.62); --glass-strong: rgba(255,255,255,.8);
+    --border: rgba(0,31,79,.10); --border-strong: rgba(0,31,79,.2);
+    --yellow: #FFD100; --on-yellow: #001F4F; --ring: #B38F00; --link: #7A5D00;
+    --glow: radial-gradient(1100px 560px at 88% -12%, rgba(255,209,0,.22), transparent 62%),
+            radial-gradient(900px 520px at -12% 112%, rgba(0,31,79,.08), transparent 60%);
+    --shadow: 0 10px 30px -14px rgba(0,31,79,.22), inset 0 1px 0 rgba(255,255,255,.9);
+    --ok-bg: rgba(16,185,129,.15); --ok-fg: #047857; --ok-line: rgba(16,185,129,.35);
+    --warn-bg: rgba(255,209,0,.15); --warn-fg: #7A5D00; --warn-line: rgba(255,209,0,.35);
+    --danger-bg: rgba(230,57,70,.15); --danger-fg: #B3141F; --danger-line: rgba(230,57,70,.4);
+    --muted-bg: rgba(148,163,184,.15); --muted-fg: #475569; --muted-line: rgba(148,163,184,.3);
+    --code-bg: rgba(0,31,79,.06);
+    color-scheme: light;
+  }
+  :root[data-theme='dark'] {
+    --bg: #00112D; --fg: #F1F5FB; --muted: #9FB0C8; --subtle: #7B8CA6;
+    --glass: rgba(255,255,255,.03); --glass-strong: rgba(255,255,255,.06);
+    --border: rgba(255,255,255,.08); --border-strong: rgba(255,255,255,.16);
+    --on-yellow: #00112D; --ring: rgba(255,209,0,.7); --link: #FFD100;
+    --glow: radial-gradient(1100px 560px at 88% -12%, rgba(255,209,0,.11), transparent 62%),
+            radial-gradient(900px 520px at -12% 112%, rgba(37,99,235,.16), transparent 60%);
+    --shadow: 0 10px 34px -12px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);
+    --ok-fg: #34D399; --warn-fg: #FFD100; --danger-fg: #FF6B76; --muted-fg: #CBD5E1;
+    --code-bg: rgba(255,255,255,.06);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+  body { margin: 0; background: var(--glow), var(--bg); background-attachment: fixed; color: var(--fg);
+    font: 400 1rem/1.6 'Work Sans', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  h1, h2, h3 { font-family: 'Outfit', system-ui, sans-serif; letter-spacing: -.02em; line-height: 1.2; }
+  h1 { font-size: clamp(1.8rem, 2.6vw + 1rem, 2.5rem); margin: 0 0 .5rem; }
+  h2 { font-size: 1.45rem; margin: 0 0 .9rem; }
+  h3 { font-size: 1.1rem; margin: 1.4rem 0 .5rem; }
+  p { margin: 0 0 .9rem; }
+  a { color: var(--link); text-underline-offset: 3px; }
+  code, kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .88em;
+    background: var(--code-bg); padding: .1em .4em; border-radius: 6px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1rem;
+    overflow-x: auto; font-size: .85rem; line-height: 1.5; margin: 0 0 1rem; }
+  pre code { background: none; padding: 0; }
+  :focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; border-radius: 6px; }
+
+  /* Barra superior de vidrio */
+  header.top { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 72%, transparent);
+    -webkit-backdrop-filter: saturate(160%) blur(16px); backdrop-filter: saturate(160%) blur(16px);
+    border-bottom: 1px solid var(--border); }
+  .bar { max-width: 1180px; margin: 0 auto; padding: .65rem 1rem; display: flex; align-items: center; gap: .8rem; }
+  .mark { width: 38px; height: 38px; border-radius: 12px; background: var(--yellow); display: grid; place-items: center;
+    box-shadow: 0 10px 24px -12px rgba(179,143,0,.55); flex: none; }
+  .brand { font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 1.1rem; }
+  .brand small { display: block; font: 400 .75rem 'Work Sans', sans-serif; color: var(--muted); }
+  .spacer { flex: 1; }
+  .icon-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 10px;
+    border: 1px solid var(--border-strong); background: var(--glass); color: var(--fg); cursor: pointer; }
+
+  /* Layout: índice lateral + contenido */
+  .layout { max-width: 1180px; margin: 0 auto; padding: 2rem 1rem 4rem; display: grid;
+    grid-template-columns: 240px minmax(0, 1fr); gap: 2rem; align-items: start; }
+  nav.toc { position: sticky; top: 84px; font-size: .92rem; }
+  nav.toc p { font-size: .72rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); margin-bottom: .4rem; }
+  nav.toc ol { list-style: none; padding: 0; margin: 0; }
+  nav.toc a { display: block; padding: .4rem .7rem; border-radius: 9px; color: var(--muted); text-decoration: none; }
+  nav.toc a:hover { background: var(--glass-strong); color: var(--fg); }
+
+  .card { background: var(--glass); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); padding: 1.6rem 1.7rem; margin-bottom: 1.5rem; }
+  .lead { color: var(--muted); font-size: 1.05rem; max-width: 65ch; }
+  .eyebrow { font-size: .75rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--subtle); margin: 0 0 .4rem; }
+
+  table { width: 100%; border-collapse: collapse; margin: .4rem 0 1rem; font-size: .95rem; }
+  th { text-align: left; font-size: .75rem; letter-spacing: .07em; text-transform: uppercase; color: var(--subtle);
+    padding: .6rem .8rem; border-bottom: 1px solid var(--border); background: var(--glass); }
+  td { padding: .75rem .8rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: 0; }
+
+  /* Réplicas de los componentes de la aplicación */
+  .pill { display: inline-flex; align-items: center; gap: .4rem; padding: .22rem .7rem; border-radius: 999px;
+    font-size: .8rem; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
+  .ok { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-line); }
+  .warn { background: var(--warn-bg); color: var(--warn-fg); border-color: var(--warn-line); }
+  .danger { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-line); }
+  .mut { background: var(--muted-bg); color: var(--muted-fg); border-color: var(--muted-line); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; margin: .8rem 0 1.2rem; }
+  .stat { display: flex; gap: .75rem; align-items: center; padding: .9rem 1rem; border-radius: 14px;
+    background: var(--glass-strong); border: 1px solid var(--border); }
+  .stat b { display: block; font: 600 1.4rem 'Outfit', sans-serif; line-height: 1; }
+  .stat span { font-size: .8rem; color: var(--muted); }
+  .stat i { width: 40px; height: 40px; border-radius: 12px; flex: none; display: grid; place-items: center; font-style: normal; font-weight: 700; }
+  .btn { display: inline-flex; align-items: center; gap: .4rem; min-height: 40px; padding: 0 1rem; border-radius: 10px;
+    font-weight: 600; font-size: .9rem; border: 1px solid var(--border-strong); background: var(--glass-strong); }
+  .btn.primary { background: var(--yellow); border-color: var(--yellow); color: var(--on-yellow); }
+
+  ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 0 0 1rem; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 .9rem 2.6rem; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: -.05rem; width: 1.8rem; height: 1.8rem;
+    border-radius: 50%; background: var(--yellow); color: var(--on-yellow); font: 600 .9rem 'Outfit', sans-serif;
+    display: grid; place-items: center; }
+  .note { border-left: 3px solid var(--yellow); background: var(--warn-bg); padding: .8rem 1rem; border-radius: 0 10px 10px 0; margin: 0 0 1rem; }
+  .flow { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: .6rem 0 1rem; }
+  .flow .arrow { color: var(--subtle); }
+  dl.glossary dt { font-weight: 600; margin-top: .8rem; }
+  dl.glossary dd { margin: .2rem 0 0; color: var(--muted); }
+  footer { max-width: 1180px; margin: 0 auto; padding: 0 1rem 3rem; color: var(--subtle); font-size: .85rem; }
+
+  main { min-width: 0; }
+  @media (max-width: 900px) {
+    /* minmax(0, 1fr): la columna no crece con el contenido que no se parte (evita scroll horizontal). */
+    .layout { grid-template-columns: minmax(0, 1fr); padding-top: 1.25rem; }
+    .flow .pill, .flow .btn { white-space: normal; }
+    nav.toc { position: static; }
+    nav.toc ol { display: flex; flex-wrap: wrap; gap: .25rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .card { padding: 1.2rem 1.1rem; }
+    .brand small { display: none; }
+    table, thead, tbody, tr, td, th { display: block; }
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    tr { padding: .5rem 0; border-bottom: 1px solid var(--border); }
+    td { border: 0; padding: .25rem .2rem; }
+  }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  @media print { header.top, nav.toc, .icon-btn { display: none; } .layout { display: block; } body { background: #fff; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="bar">
+    <span class="mark" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#001F4F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    </span>
+    <div class="brand">Catálogo <small>Manual de uso</small></div>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="theme" type="button" aria-label="Cambiar a tema oscuro" title="Tema oscuro">◐</button>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="toc" aria-label="Contenido">
+    <p>Contenido</p>
+    <ol>
+      <li><a href="#que-es">Qué es</a></li>
+      <li><a href="#arrancar">Arrancar el sistema</a></li>
+      <li><a href="#acceso">Iniciar sesión</a></li>
+      <li><a href="#catalogo">La pantalla Catálogo</a></li>
+      <li><a href="#estados">Estados de sincronización</a></li>
+      <li><a href="#editar">Crear, editar y eliminar</a></li>
+      <li><a href="#sincronizar">Sincronizar ahora</a></li>
+      <li><a href="#errores">Si algo falla</a></li>
+      <li><a href="#registro">Pantalla Sincronización</a></li>
+      <li><a href="#dispositivos">Tema y dispositivos</a></li>
+      <li><a href="#admin">Para administradores</a></li>
+      <li><a href="#faq">Preguntas frecuentes</a></li>
+      <li><a href="#glosario">Glosario</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <section class="card" id="que-es">
+      <p class="eyebrow">Manual básico</p>
+      <h1>Catálogo distribuido</h1>
+      <p class="lead">Una aplicación para consultar y modificar un catálogo de productos, servicios y contenidos.
+        La información oficial vive en un sistema central (la <strong>fuente de verdad</strong>); esta aplicación
+        trabaja con una copia local rápida y le envía cada cambio para que lo confirme.</p>
+      <div class="flow" aria-label="Recorrido de un cambio">
+        <span class="btn">Tú editas</span><span class="arrow">→</span>
+        <span class="pill warn">⏳ Pendiente de confirmación</span><span class="arrow">→</span>
+        <span class="btn">La fuente de verdad lo acepta</span><span class="arrow">→</span>
+        <span class="pill ok">✓ Sincronizado</span>
+      </div>
+      <p>La idea clave: <strong>un cambio no es definitivo hasta que la fuente de verdad lo acepta</strong>. Por eso
+        la aplicación siempre te muestra en qué punto está cada cambio.</p>
+    </section>
+
+    <section class="card" id="arrancar">
+      <h2>Arrancar el sistema</h2>
+      <p>Solo hace falta Docker. Desde la carpeta del proyecto:</p>
+      <pre><code>cp .env.example .env
+docker compose up --build</code></pre>
+      <p>La primera vez tarda unos minutos (compila las aplicaciones). Cuando <code>docker compose ps</code> muestre los
+        cuatro servicios como <code>healthy</code>, abre:</p>
+      <table>
+        <thead><tr><th>Qué</th><th>Dirección</th></tr></thead>
+        <tbody>
+          <tr><td>La aplicación</td><td><a href="http://localhost:8088">http://localhost:8088</a></td></tr>
+          <tr><td>Consola de usuarios (Keycloak)</td><td><a href="http://localhost:8095">http://localhost:8095</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="acceso">
+      <h2>Iniciar sesión</h2>
+      <ol class="steps">
+        <li>Abre la aplicación y pulsa <span class="btn primary">Iniciar sesión</span>.</li>
+        <li>Se abre la pantalla de acceso. Escribe tu usuario y contraseña.</li>
+        <li>Volverás automáticamente al catálogo.</li>
+      </ol>
+      <table>
+        <thead><tr><th>Usuario</th><th>Contraseña (con <code>.env.example</code>)</th><th>Puede</th></tr></thead>
+        <tbody>
+          <tr><td><code>demo</code></td><td><code>demo-dev-only</code></td><td>Consultar y modificar el catálogo.</td></tr>
+          <tr><td><code>admin</code></td><td><code>admin-dev-only</code></td><td>Lo mismo, y además ver las métricas técnicas.</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Las contraseñas reales están en tu fichero <code>.env</code> (<code>DEMO_USER_PASSWORD</code> y
+        <code>DEMO_ADMIN_PASSWORD</code>). Para salir, usa el icono de cerrar sesión de la barra superior.</p>
+    </section>
+
+    <section class="card" id="catalogo">
+      <h2>La pantalla Catálogo</h2>
+      <p>Es la pantalla principal. De arriba abajo:</p>
+      <h3>1 · Tarjetas de resumen</h3>
+      <div class="stats" aria-label="Ejemplo de tarjetas de resumen">
+        <div class="stat"><i class="mut">≡</i><div><b>128</b><span>Total de ítems</span></div></div>
+        <div class="stat"><i class="ok">✓</i><div><b>117</b><span>Activos</span></div></div>
+        <div class="stat"><i class="warn">⏳</i><div><b>2</b><span>Pendientes de confirmar</span></div></div>
+        <div class="stat"><i class="danger">!</i><div><b>1</b><span>Con error</span></div></div>
+      </div>
+      <p>Muestran los totales de todo el catálogo. <strong>«Pendientes» y «Con error» son atajos:</strong> al pulsarlas,
+        la tabla muestra solo esos ítems; vuelve a pulsar para quitar el filtro.</p>
+      <h3>2 · Búsqueda y filtros</h3>
+      <p>Busca por nombre y filtra por <strong>estado</strong> (activos / inactivos), <strong>tipo</strong>
+        (producto, servicio, contenido) y <strong>sincronización</strong>. Se pueden combinar.</p>
+      <h3>3 · Tabla</h3>
+      <p>Cada fila muestra nombre, descripción, estado, tipo, fecha de actualización y su
+        <a href="#estados">estado de sincronización</a>. Las acciones aparecen a la derecha según el caso.
+        Arriba a la derecha tienes <span class="btn">Sincronizar ahora</span> y <span class="btn primary">+ Nuevo ítem</span>.</p>
+    </section>
+
+    <section class="card" id="estados">
+      <h2>Estados de sincronización</h2>
+      <p>Cada ítem indica si coincide con la fuente de verdad. Además del color, siempre lleva un icono y un texto.</p>
+      <table>
+        <thead><tr><th>Estado</th><th>Qué significa</th><th>Qué puedes hacer</th></tr></thead>
+        <tbody>
+          <tr><td><span class="pill ok">✓ Sincronizado</span></td><td>Coincide con la fuente de verdad.</td><td>Editar o eliminar.</td></tr>
+          <tr><td><span class="pill warn">⏳ Pendiente de confirmación</span></td><td>Tu cambio está guardado y se ha enviado; falta que la fuente de verdad lo acepte. Suele tardar uno o dos segundos.</td><td>Esperar. Mientras tanto no se puede volver a editar ese ítem.</td></tr>
+          <tr><td><span class="pill danger">! Error de sincronización</span></td><td>La fuente de verdad no aceptó el cambio. Debajo verás el motivo.</td><td>Ver <a href="#errores">Si algo falla</a>.</td></tr>
+        </tbody>
+      </table>
+      <p>El estado del ítem (<span class="pill ok"><span class="dot"></span>Activo</span> /
+        <span class="pill mut"><span class="dot"></span>Inactivo</span>) es otra cosa: es un dato del propio ítem, que
+        puedes cambiar al editarlo. Un ítem inactivo sigue en el catálogo.</p>
+    </section>
+
+    <section class="card" id="editar">
+      <h2>Crear, editar y eliminar</h2>
+      <h3>Crear un ítem</h3>
+      <ol class="steps">
+        <li>Pulsa <span class="btn primary">+ Nuevo ítem</span>.</li>
+        <li>Rellena el <strong>nombre</strong> (obligatorio, hasta 120 caracteres), la descripción (opcional), el tipo
+          y el estado. Si falta algo, el formulario te lo indica junto al campo.</li>
+        <li>Pulsa <span class="btn primary">Guardar</span>. El ítem aparece como
+          <span class="pill warn">⏳ Pendiente</span> y, en uno o dos segundos, <span class="pill ok">✓ Sincronizado</span>.</li>
+      </ol>
+      <h3>Editar</h3>
+      <p>Pulsa el icono de lápiz de la fila, cambia lo que necesites y guarda. Solo se pueden editar ítems
+        <strong>sincronizados</strong>: así un cambio nunca se mezcla con otro que aún no se ha confirmado.</p>
+      <h3>Eliminar</h3>
+      <p>Pulsa el icono de papelera y confirma en el diálogo. La fila aparece tachada hasta que la fuente de verdad
+        confirma el borrado; entonces desaparece. <strong>El borrado es definitivo.</strong></p>
+    </section>
+
+    <section class="card" id="sincronizar">
+      <h2>Sincronizar ahora</h2>
+      <p>La fuente de verdad también puede recibir cambios desde otros sistemas. La aplicación los incorpora sola cada
+        minuto; si quieres verlos al momento, pulsa <span class="btn">Sincronizar ahora</span>. Verás un resumen con los
+        ítems nuevos, actualizados y eliminados.</p>
+      <p>Sincronizar nunca pisa un cambio tuyo que esté pendiente o con error.</p>
+    </section>
+
+    <section class="card" id="errores">
+      <h2>Si algo falla</h2>
+      <table>
+        <thead><tr><th>Lo que ves</th><th>Por qué ocurre</th><th>Qué hacer</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="pill warn">⏳ Pendiente</span><br /><small>«Reintentando automáticamente · Producer no disponible (intento N)»</small></td>
+            <td>La fuente de verdad no responde en este momento.</td>
+            <td><strong>Nada.</strong> Tu cambio está a salvo y se reintenta solo; se confirmará cuando vuelva.</td>
+          </tr>
+          <tr>
+            <td><span class="pill danger">! Error</span><br /><small>«Conflicto: el ítem cambió…»</small></td>
+            <td>Alguien modificó el mismo ítem en la fuente de verdad antes de que llegara tu cambio.</td>
+            <td>Pulsa <strong>Descartar cambio</strong> para ver la versión actual y vuelve a editar si lo necesitas.</td>
+          </tr>
+          <tr>
+            <td><span class="pill danger">! Error</span><br /><small>«El ítem ya no existe…»</small></td>
+            <td>El ítem se eliminó en la fuente de verdad.</td>
+            <td>Pulsa <strong>Descartar cambio</strong>: el ítem se retira de tu lista.</td>
+          </tr>
+          <tr>
+            <td><span class="pill danger">! Error</span><br /><small>«El Producer rechazó el cambio…»</small></td>
+            <td>La fuente de verdad rechazó el cambio por otro motivo.</td>
+            <td>Pulsa <strong>Reintentar</strong> si la causa ya se corrigió, o <strong>Descartar cambio</strong>.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note">«Reintentar» solo aparece cuando reintentar tiene sentido. Ante un conflicto, reenviar el mismo
+        cambio volvería a fallar, así que la aplicación solo te ofrece descartarlo.</p>
+    </section>
+
+    <section class="card" id="registro">
+      <h2>Pantalla Sincronización</h2>
+      <p>En la barra superior, <strong>Sincronización</strong> abre el registro de todos los envíos a la fuente de
+        verdad: qué se envió, cuándo, cuántos intentos llevó y, si falló, por qué. Por defecto muestra los
+        <strong>fallidos</strong>; puedes ver también los pendientes, los enviados o todos.</p>
+      <p>Es útil para entender qué ha pasado con un cambio concreto. Las acciones (reintentar o descartar) están en la
+        pantalla Catálogo.</p>
+    </section>
+
+    <section class="card" id="dispositivos">
+      <h2>Tema y dispositivos</h2>
+      <p>La aplicación empieza en <strong>tema claro</strong>. El icono de luna/sol de la barra superior cambia al
+        oscuro y la elección se recuerda.</p>
+      <table>
+        <thead><tr><th>Dispositivo</th><th>Cómo se adapta</th></tr></thead>
+        <tbody>
+          <tr><td>Móvil</td><td>La tabla se convierte en tarjetas apiladas y la navegación queda solo con iconos.</td></tr>
+          <tr><td>Tablet</td><td>El resumen pasa a dos columnas; si la tabla no cabe, se desplaza dentro de su tarjeta.</td></tr>
+          <tr><td>Pantalla táctil / TPV</td><td>Botones y campos más grandes para el dedo.</td></tr>
+          <tr><td>Ordenador y pantallas anchas</td><td>El contenido aprovecha el ancho sin estirarse en exceso.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="admin">
+      <h2>Para administradores</h2>
+      <h3>Crear información en la fuente de verdad</h3>
+      <p>La fuente de verdad (Producer API) no tiene pantalla: se administra por API con su token de administración
+        (<code>PRODUCER_ADMIN_TOKEN</code> en <code>.env</code>):</p>
+      <pre><code>set -a; source .env; set +a
+curl -X POST http://localhost:8082/api/items \
+  -H "Authorization: Bearer $PRODUCER_ADMIN_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"nombre":"Creado en el Producer","estado":"ACTIVO","tipo":"SERVICIO"}'</code></pre>
+      <p>Después, en la aplicación, pulsa <span class="btn">Sincronizar ahora</span> para verlo.</p>
+      <h3>Más recursos</h3>
+      <ul>
+        <li><a href="api.html">Referencia de las APIs (Swagger)</a> — todos los endpoints de ambas APIs.</li>
+        <li><a href="curl.md">Ejemplos con curl</a> y <a href="catalogo.postman_collection.json">colección de Postman</a>.</li>
+        <li><a href="../README.md">README</a> — arquitectura, decisiones técnicas, supuestos y limitaciones.</li>
+        <li>Métricas técnicas: <code>/actuator/prometheus</code> en la Consumer API, con el usuario <code>admin</code>.</li>
+        <li>Usuarios y contraseñas: consola de Keycloak en <a href="http://localhost:8095">http://localhost:8095</a>.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="faq">
+      <h2>Preguntas frecuentes</h2>
+      <h3>¿Por qué mi cambio aparece «pendiente» en lugar de guardarse directamente?</h3>
+      <p>Porque la información oficial la decide la fuente de verdad. La aplicación guarda tu cambio al instante y lo
+        marca como pendiente hasta recibir la confirmación, que normalmente llega en uno o dos segundos.</p>
+      <h3>¿Puedo perder un cambio si se cae la conexión o se reinicia el sistema?</h3>
+      <p>No. El cambio queda guardado antes de que veas «pendiente» y se reenvía solo hasta que se confirma, sin
+        duplicarse.</p>
+      <h3>No puedo editar un ítem, ¿por qué?</h3>
+      <p>Tiene un cambio pendiente o con error. Espera a que se sincronice o resuelve el error (descartar o reintentar).</p>
+      <h3>No veo un ítem que se creó en otro sistema.</h3>
+      <p>Pulsa <span class="btn">Sincronizar ahora</span>, o espera como mucho un minuto.</p>
+    </section>
+
+    <section class="card" id="glosario">
+      <h2>Glosario</h2>
+      <dl class="glossary">
+        <dt>Fuente de verdad (Producer)</dt><dd>El sistema central que guarda la información oficial y decide si un cambio se acepta.</dd>
+        <dt>Copia local (Consumer)</dt><dd>La copia rápida con la que trabaja esta aplicación.</dd>
+        <dt>Sincronizado</dt><dd>La copia local coincide con la fuente de verdad.</dd>
+        <dt>Pendiente de confirmación</dt><dd>Cambio guardado y enviado, a la espera de que la fuente de verdad lo acepte.</dd>
+        <dt>Conflicto</dt><dd>El ítem cambió en la fuente de verdad después de que lo abrieras; tu cambio no se aplica para no pisar el otro.</dd>
+        <dt>Descartar cambio</dt><dd>Abandona tu cambio y recupera la versión oficial del ítem.</dd>
+        <dt>Sincronizar ahora</dt><dd>Trae al momento los cambios hechos directamente en la fuente de verdad.</dd>
+      </dl>
+    </section>
+  </main>
+</div>
+
+<footer>Catálogo distribuido · Manual básico de uso. La documentación técnica completa está en el
+  <a href="../README.md">README</a>.</footer>
+
+<script>
+  // Tema: claro por defecto; el oscuro solo si se elige (recordado en este navegador).
+  (function () {
+    var root = document.documentElement, btn = document.getElementById('theme');
+    function apply(t) {
+      if (t === 'dark') root.setAttribute('data-theme', 'dark'); else root.removeAttribute('data-theme');
+      btn.setAttribute('aria-label', t === 'dark' ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro');
+      btn.title = t === 'dark' ? 'Tema claro' : 'Tema oscuro';
+    }
+    var saved = null;
+    try { saved = localStorage.getItem('manual-theme'); } catch (e) {}
+    apply(saved === 'dark' ? 'dark' : 'light');
+    btn.addEventListener('click', function () {
+      var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      apply(next);
+      try { localStorage.setItem('manual-theme', next); } catch (e) {}
+    });
+  })();
+</script>
+</body>
+</html>

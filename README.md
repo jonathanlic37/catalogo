@@ -24,7 +24,10 @@ compila las imágenes y tarda unos minutos.
    [`docs/curl.md`](docs/curl.md) §1, pulsa **«Sincronizar ahora»**, edítalo y observa
    «Pendiente de confirmación» → «Sincronizado». La tabla de
    [§5](#cómo-demostrar-cada-paso) da cada paso del enunciado a mano y con su prueba automática.
-4. **Dónde está cada cosa que se evalúa:**
+4. **Documentación visual** (se abre con doble clic): [`docs/manual.html`](docs/manual.html), manual
+   básico de uso con la misma estética de la aplicación, y [`docs/api.html`](docs/api.html), referencia
+   Swagger de ambas APIs.
+5. **Dónde está cada cosa que se evalúa:**
 
 | Criterio de la rúbrica | Dónde mirarlo |
 |---|---|
@@ -450,6 +453,19 @@ obtener el token de usuario. **Con Postman:**
 [`docs/catalogo.postman_collection.json`](docs/catalogo.postman_collection.json), que obtiene el
 token automáticamente.
 
+**Manual de uso:** [`docs/manual.html`](docs/manual.html) explica la aplicación para un usuario
+final: acceso, pantallas, qué significa cada estado de sincronización, qué hacer ante un conflicto
+o un error, y la administración del Producer. Autocontenido: se abre con doble clic, sin conexión.
+
+**Referencia de las APIs (Swagger / OpenAPI 3):** [`docs/api.html`](docs/api.html) muestra con
+Swagger UI todos los endpoints, parámetros, esquemas, códigos de respuesta y la seguridad de ambas
+APIs. Las especificaciones fuente son [`docs/openapi/consumer-api.yaml`](docs/openapi/consumer-api.yaml)
+y [`docs/openapi/producer-api.yaml`](docs/openapi/producer-api.yaml), validadas con Redocly e
+importables en Postman, Insomnia o <https://editor.swagger.io>. Tras editar un YAML, regenera la
+página con `python3 scripts/build-api-docs.py`. Es una referencia de solo lectura: abierta como
+fichero local no puede llamar a las APIs (su CORS solo admite el origen de la UI); para ejecutar
+peticiones usa curl o Postman.
+
 **Smoke test end-to-end**, contra el stack levantado: recorre los criterios de aceptación y los
 cuatro escenarios de §6, e incluye parar el Producer y reiniciar el Consumer.
 
@@ -587,9 +603,10 @@ consumer-api/        Spring Boot · proyección, outbox, relay, reconciliación,
 frontend/            React + Vite · UI, OIDC (PKCE), nginx (proxy, CSP, rate limit)
 auth/                Realm de Keycloak (clientes, roles y usuarios de demo)
 contracts/           Contratos JSON Consumer↔Producer compartidos por los tests de ambos lados
-scripts/             smoke-test.sh (E2E de API) y hooks de git
+scripts/             smoke-test.sh (E2E de API), build-api-docs.py (genera docs/api.html) y hooks de git
 e2e/                 Playwright · E2E de navegador con login real y capturas
-docs/                curl.md, colección Postman y AUDITORIA.md
+docs/                manual.html (manual de uso), api.html + openapi/ (Swagger de ambas APIs),
+                     curl.md, colección Postman y AUDITORIA.md
 docker-compose.yml   Orquestación · .env.example: configuración de ejemplo
 ```
 
