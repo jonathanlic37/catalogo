@@ -260,6 +260,12 @@ export function CatalogoList() {
                   <td data-label="Sincronización">
                     <SyncBadge item={item} />
                     {item.syncStatus === 'FAILED' && item.syncError && <div className="err-line">{item.syncError}</div>}
+                    {item.syncStatus === 'PENDING' && item.syncError && (
+                      <div className="hint">
+                        Reintentando automáticamente · {item.syncError}
+                        {item.syncAttempts ? ` (intento ${item.syncAttempts})` : ''}
+                      </div>
+                    )}
                   </td>
                   <td className="cell-actions">
                     {item.syncStatus === 'CONFIRMED' && (
@@ -280,6 +286,9 @@ export function CatalogoList() {
                     )}
                     {item.syncStatus === 'FAILED' && (
                       <>
+                        {/* Reenviar el mismo cambio solo sirve ante un rechazo; ante un conflicto o un
+                            ítem ya borrado volvería a fallar: ahí solo se ofrece descartar. */}
+                        {canRetry(item) && (
                         <button
                           className="icon-btn"
                           aria-label={`Reintentar ${item.nombre}`}
@@ -289,6 +298,7 @@ export function CatalogoList() {
                         >
                           <RefreshCw size={18} aria-hidden="true" />
                         </button>
+                        )}
                         <button
                           className="icon-btn danger"
                           aria-label={`Descartar cambio de ${item.nombre}`}
@@ -352,4 +362,9 @@ export function CatalogoList() {
       />
     </section>
   );
+}
+
+/** Solo tiene sentido reenviar el mismo cambio si el Producer lo rechazó (p. ej. credenciales ya corregidas). */
+function canRetry(item: Item): boolean {
+  return item.failureReason === undefined || item.failureReason === 'REJECTED';
 }

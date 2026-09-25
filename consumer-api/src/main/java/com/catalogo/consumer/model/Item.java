@@ -72,6 +72,13 @@ public class Item {
 
     private Instant nextRetryAt;
 
+    /** Motivo del último fallo definitivo (solo con syncStatus FAILED). */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private FailureReason failureReason;
+
+    public FailureReason getFailureReason() { return failureReason; }
+    public void setFailureReason(FailureReason failureReason) { this.failureReason = failureReason; }
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
     public String getNombre() { return nombre; }

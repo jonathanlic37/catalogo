@@ -30,6 +30,7 @@ public final class ItemMapper {
         local.setSyncAttempts(0);
         local.setLastSyncError(null);
         local.setNextRetryAt(null);
+        local.setFailureReason(null);
         return local;
     }
 }
