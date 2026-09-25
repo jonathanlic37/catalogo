@@ -1,68 +1,418 @@
 {
   "info": {
     "name": "Catálogo — sincronización por webhooks",
+    "description": "Ejecutar en orden. '0. Login' obtiene el JWT de usuario de Keycloak y lo guarda en {{userToken}}. El Producer usa dos credenciales: {{producerToken}} (= CONSUMER_TO_PRODUCER_TOKEN: webhook + lectura) y {{adminToken}} (= PRODUCER_ADMIN_TOKEN: escritura directa). {{demoPassword}} = DEMO_USER_PASSWORD del .env.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "consumer", "value": "http://localhost:8081" },
-    { "key": "producer", "value": "http://localhost:8082" },
-    { "key": "frontendToken", "value": "cambiar-token-frontend-a-consumer-0000000000000000" },
-    { "key": "producerToken", "value": "cambiar-token-consumer-a-producer-0000000000000000" },
-    { "key": "itemId", "value": "" }
+    {
+      "key": "consumer",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "producer",
+      "value": "http://localhost:8082"
+    },
+    {
+      "key": "realm",
+      "value": "http://localhost:8095/realms/catalogo"
+    },
+    {
+      "key": "producerToken",
+      "value": "dev-only-consumer-to-producer-token-for-local-use-0001"
+    },
+    {
+      "key": "adminToken",
+      "value": "dev-only-producer-admin-token-for-local-use-0001"
+    },
+    {
+      "key": "demoPassword",
+      "value": "demo-dev-only"
+    },
+    {
+      "key": "userToken",
+      "value": ""
+    },
+    {
+      "key": "itemId",
+      "value": ""
+    },
+    {
+      "key": "idemKey",
+      "value": ""
+    },
+    {
+      "key": "webhookItemId",
+      "value": ""
+    }
   ],
   "item": [
     {
-      "name": "Consumer — crear ítem (202 PENDING)",
-      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('itemId', pm.response.json().id);"] } }],
-      "request": {
-        "method": "POST",
-        "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-        "url": "{{consumer}}/api/items",
-        "body": { "mode": "raw", "raw": "{\"nombre\":\"Café molido\",\"descripcion\":\"500 g\",\"estado\":\"ACTIVO\"}" }
-      }
-    },
-    {
-      "name": "Consumer — listar",
-      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items" }
-    },
-    {
-      "name": "Consumer — obtener por id",
-      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items/{{itemId}}" }
-    },
-    {
-      "name": "Consumer — editar (202)",
-      "request": {
-        "method": "PUT",
-        "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-        "url": "{{consumer}}/api/items/{{itemId}}",
-        "body": { "mode": "raw", "raw": "{\"nombre\":\"Café molido 1 kg\",\"descripcion\":\"1 kg\",\"estado\":\"ACTIVO\"}" }
-      }
-    },
-    {
-      "name": "Consumer — eliminar (202)",
-      "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items/{{itemId}}" }
-    },
-    {
-      "name": "Producer — obtener ítem (fuente de verdad)",
-      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{producerToken}}" }], "url": "{{producer}}/api/items/{{itemId}}" }
-    },
-    {
-      "name": "Producer — webhook CREATED (repetir con la misma clave prueba idempotencia)",
+      "name": "0. Login (Keycloak, usuario demo)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('token obtenido', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('userToken', pm.response.json().access_token);"
+            ]
+          }
+        }
+      ],
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Authorization", "value": "Bearer {{producerToken}}" },
-          { "key": "Idempotency-Key", "value": "clave-fija-de-prueba-001" },
-          { "key": "X-Event-Type", "value": "CREATED" },
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/x-www-form-urlencoded"
+          }
         ],
-        "url": "{{producer}}/webhooks/catalogo",
-        "body": { "mode": "raw", "raw": "{\"id\":\"11111111-2222-3333-4444-555555555555\",\"nombre\":\"Directo\",\"descripcion\":\"vía webhook\",\"estado\":\"ACTIVO\"}" }
+        "url": "{{realm}}/protocol/openid-connect/token",
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "client_id",
+              "value": "catalogo-cli"
+            },
+            {
+              "key": "grant_type",
+              "value": "password"
+            },
+            {
+              "key": "username",
+              "value": "demo"
+            },
+            {
+              "key": "password",
+              "value": "{{demoPassword}}"
+            }
+          ]
+        }
       }
     },
     {
-      "name": "Consumer — sin token (401)",
-      "request": { "method": "GET", "header": [], "url": "{{consumer}}/api/items" }
+      "name": "1. Producer — crear ítem (fuente de verdad)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('itemId', pm.response.json().id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{adminToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{producer}}/api/items",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\":\"Creado en el Producer\",\"descripcion\":\"origen canónico\",\"estado\":\"ACTIVO\",\"tipo\":\"SERVICIO\"}"
+        }
+      }
+    },
+    {
+      "name": "2. Consumer — reconciliar (sincronizar ahora)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": "{{consumer}}/api/reconcile"
+      }
+    },
+    {
+      "name": "3. Consumer — listar (paginado, búsqueda y filtros)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{consumer}}/api/items?page=0&size=25&tipo=SERVICIO",
+          "host": [
+            "{{consumer}}"
+          ],
+          "path": [
+            "api",
+            "items"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "0"
+            },
+            {
+              "key": "size",
+              "value": "25"
+            },
+            {
+              "key": "tipo",
+              "value": "SERVICIO"
+            },
+            {
+              "key": "q",
+              "value": "",
+              "disabled": true
+            },
+            {
+              "key": "estado",
+              "value": "ACTIVO",
+              "disabled": true
+            },
+            {
+              "key": "sync",
+              "value": "FAILED",
+              "disabled": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Consumer — editar (202 PENDING → webhook)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('202 pendiente de confirmación', () => { pm.response.to.have.status(202); pm.expect(pm.response.json().syncStatus).to.eql('PENDING'); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{consumer}}/api/items/{{itemId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\":\"Editado desde el Consumer\",\"descripcion\":\"vía webhook\",\"estado\":\"INACTIVO\",\"tipo\":\"SERVICIO\"}"
+        }
+      }
+    },
+    {
+      "name": "5. Consumer — obtener (CONFIRMED con la versión canónica)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": "{{consumer}}/api/items/{{itemId}}"
+      }
+    },
+    {
+      "name": "6. Producer — obtener (la fuente de verdad tiene el cambio)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{producerToken}}"
+          }
+        ],
+        "url": "{{producer}}/api/items/{{itemId}}"
+      }
+    },
+    {
+      "name": "7. Producer — webhook CREATED (enviar dos veces: el 2.º es replay idempotente)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.collectionVariables.get('idemKey')) { pm.collectionVariables.set('idemKey', pm.variables.replaceIn('{{$guid}}')); pm.collectionVariables.set('webhookItemId', pm.variables.replaceIn('{{$guid}}')); }"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('201', () => pm.response.to.have.status(201));",
+              "console.log('Idempotent-Replayed:', pm.response.headers.get('Idempotent-Replayed'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{producerToken}}"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "{{idemKey}}"
+          },
+          {
+            "key": "X-Event-Type",
+            "value": "CREATED"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{producer}}/webhooks/catalogo",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"id\":\"{{webhookItemId}}\",\"nombre\":\"Directo\",\"descripcion\":\"vía webhook\",\"estado\":\"ACTIVO\"}"
+        }
+      }
+    },
+    {
+      "name": "8. Consumer — registro de eventos fallidos",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": "{{consumer}}/api/sync/events?status=FAILED"
+      }
+    },
+    {
+      "name": "9. Consumer — eliminar (202 → webhook DELETED)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{userToken}}"
+          }
+        ],
+        "url": "{{consumer}}/api/items/{{itemId}}"
+      }
+    },
+    {
+      "name": "10. Seguridad — Consumer sin token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{consumer}}/api/items"
+      }
+    },
+    {
+      "name": "11. Seguridad — webhook sin token (401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('401', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{producer}}/webhooks/catalogo",
+        "body": {
+          "mode": "raw",
+          "raw": "{}"
+        }
+      }
+    },
+    {
+      "name": "12. Seguridad — el Consumer no puede escribir directamente en el Producer (403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{producerToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{producer}}/api/items",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"nombre\":\"Atajo\",\"estado\":\"ACTIVO\"}"
+        }
+      }
     }
   ]
 }

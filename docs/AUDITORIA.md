@@ -36,16 +36,16 @@ Pruebas de concurrencia (stack real): **100 altas simultáneas** (50 hilos) → 
 
 | ID | Sev. | Hallazgo | Mitigación | Estado |
 |---|---|---|---|---|
-| S1 | Alta | **La UI no tiene autenticación de usuario**: nginx inyecta el token del servicio, así que cualquiera que alcance el puerto puede modificar el catálogo. Además escuchaba en `0.0.0.0`. | La UI escucha solo en `127.0.0.1` por defecto (`FRONTEND_BIND`). Se documenta que exponerla exige un proxy con TLS y login. | **Riesgo residual**: añadir login requiere un proveedor de identidad (fuera del alcance). |
+| S1 | Alta | **La UI no tiene autenticación de usuario**: nginx inyecta el token del servicio, así que cualquiera que alcance el puerto puede modificar el catálogo. Además escuchaba en `0.0.0.0`. | Primero, la UI pasó a escuchar solo en `127.0.0.1`. **Después se resolvió del todo:** login OIDC (Keycloak, Authorization Code + PKCE), el Consumer valida el JWT y los roles, y nginx ya no inyecta ningún token (ver §7). | **Resuelto.** |
 | S2 | Alta | Las APIs aceptaban tokens cortos o el valor de ejemplo de `.env.example`. | Las APIs **no arrancan** si un token tiene < 32 caracteres o contiene "cambiar". | Verificado: el contenedor aborta con el mensaje; tests unitarios. |
 | S3 | Media | nginx sin cabeceras de seguridad, versión expuesta, corriendo como root, sin límite de cuerpo explícito. | Imagen `nginx-unprivileged` (usuario 101), CSP estricta (verificado: el `index.html` no tiene scripts inline), `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `server_tokens off`, cuerpo ≤ 64 KB (413), caché inmutable para assets con hash y `no-store` en `/api`. | Verificado con `curl`. |
 | S4 | Media | Contenedores con privilegios por defecto: sistema de ficheros escribible, todas las capabilities, sin límites, logs sin rotar. | Java: `read_only`, `cap_drop: ALL`, `no-new-privileges`, 512 MB, 200 procesos; nginx: sin capabilities, 128 MB; logs `json-file` 10 MB × 3. | Verificado con `docker inspect`; los tres servicios `healthy`. |
 | S5 | Baja | `.env` (con secretos) con permisos 664. | `chmod 600` y documentado. | Verificado. |
-| S6 | Info | Sin límite de peticiones por cliente. | No se implementó: con tokens de 256 bits y sin exposición externa el riesgo es bajo. | **Aceptado**, documentado. |
+| S6 | Info | Sin límite de peticiones por cliente. | Después se añadió `limit_req` por IP en nginx (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`, responde 429). | **Resuelto** en el proxy; las APIs no tienen límite propio. |
 | S7 | Info | Sin TLS entre contenedores. | La red `backend` es interna (sin salida a Internet). | **Aceptado**, documentado. |
 
-Comprobado sin hallazgo: el navegador no puede suplantar el token (nginx sobrescribe `Authorization`),
-sin token → 401 en ambas APIs, el bundle no contiene tokens, las validaciones no exponen trazas.
+Comprobado sin hallazgo (en su momento): sin token → 401 en ambas APIs, el bundle no contiene tokens y
+las validaciones no exponen trazas.
 
 ## 4. Datos y disponibilidad
 
@@ -58,21 +58,45 @@ sin token → 401 en ambas APIs, el bundle no contiene tokens, las validaciones 
 
 ## 5. Pruebas
 
-| Módulo | Antes | Ahora |
+| Módulo | Primera auditoría | Tras la verificación contra el enunciado (§7) |
 |---|---|---|
-| `producer-api` | 5 | **11** (actualización y borrado idempotentes, paginación, 415/400, purga, backup, validación de tokens…) |
-| `consumer-api` | 4 | **12** (edición, borrado incl. 404, paginación/búsqueda/resumen, reconciliación, seguridad, errores estándar…) |
-| `frontend` | 0 | **14** con Vitest + Testing Library (lista, paginación, búsqueda, confirmaciones, reintento/descarte, formulario, badge) |
+| `producer-api` | 5 → 11 | **22** |
+| `consumer-api` | 4 → 12 | **21** (incluye `OutboxBatchCutoffTest`, que cubre L3) |
+| `frontend` | 0 → 14 | **21** |
+| E2E de API | — | `scripts/smoke-test.sh`: criterios de aceptación y los cuatro escenarios del enunciado sobre el stack real |
+| E2E de navegador | — | `e2e/` (Playwright): login real en Keycloak y flujo completo en Chromium, con capturas |
 
-Ejecución: ver README → «Pruebas automatizadas».
+Ejecución: README §11.
 
 ## 6. Riesgos residuales (no mitigados)
 
-1. **UI sin login** (S1): depende de mantener el puerto en `127.0.0.1` o de un proxy autenticado delante.
-2. **Tokens estáticos compartidos**, sin rotación, y **sin rate limiting** (S6).
+1. **Tokens estáticos** entre servicios (servicio y administración, ya separados), sin rotación y sin TLS en la red interna.
+2. **Keycloak en modo desarrollo** (H2 embebido y usuarios de demostración; sus contraseñas vienen del entorno).
 3. **SQLite de un solo escritor**: adecuado para decenas de miles de ítems; el backup retiene brevemente la única conexión.
-4. **Reconciliación completa cada minuto**: ahora paginada y acotada en memoria, pero sigue siendo O(N) en red; con cientos de miles de ítems habría que hacerla incremental. Un borrado masivo en el Producer provoca una consulta puntual por ítem ausente.
+4. **Reconciliación completa cada minuto**: paginada y acotada en memoria, pero O(N) en red; con cientos de miles de ítems habría que hacerla incremental.
 5. La búsqueda por nombre solo ignora mayúsculas/minúsculas ASCII (`lower()` de SQLite).
 6. `ddl-auto=update` en lugar de migraciones versionadas.
-7. Un conflicto de versión (409) no se resuelve automáticamente: el usuario reintenta o descarta el cambio.
-8. Sin verificar: el corte de lote ante Producer caído (L3) y la restauración de backups (D1) no tienen prueba automatizada.
+7. Sin verificar de extremo a extremo: la restauración de backups (D1).
+
+## 7. Verificación contra el enunciado de la prueba técnica
+
+Revisión completa del código, la configuración y los documentos contra el enunciado y su rúbrica.
+Se reprodujo cada hallazgo y se corrigió; la verificación final se hizo **en una copia limpia del
+repositorio**, siguiendo literalmente `cp .env.example .env && docker compose up --build`.
+
+| ID | Sev. | Hallazgo | Corrección | Verificación |
+|---|---|---|---|---|
+| V1 | **Alta** | **El sistema no arrancaba siguiendo las instrucciones del enunciado**: el token de `.env.example` contenía «cambiar» y las APIs se negaban a arrancar (el CI lo ocultaba sustituyéndolo con `sed`). | `.env.example` trae valores `dev-only-…` (no son secretos reales) que las APIs aceptan con un aviso en el log. Los tokens cortos o con marcador siguen rechazándose. El CI usa ahora las instrucciones literales. | Arranque desde cero en una copia limpia: 4 servicios `healthy` y smoke OK. Test `tokenDeDesarrolloDeEnvExampleSeAcepta`. |
+| V2 | **Alta** | **La confirmación de un evento no era atómica**: el relay marcaba el evento `SENT` y actualizaba la proyección en dos transacciones. Si el Consumer caía entre ambas, el ítem quedaba `PENDING` para siempre, sin evento que lo reenviara y con la edición bloqueada (es el escenario «Consumer se reinicia durante la sincronización»). | Tras la respuesta del Producer, estado del evento y proyección se escriben en **una** transacción (`TransactionTemplate`), sin transacción durante el HTTP. | Tests del relay; smoke paso 6 (reinicio con un cambio pendiente → confirmado). |
+| V3 | Media | **Un conflicto podía aceptarse como éxito en silencio**: el Producer comprobaba `occurredAt` antes de la versión. Una edición basada en una versión superada con un `occurredAt` anterior (p. ej. reloj atrasado) se descartaba y se respondía 200 con el estado actual: el usuario veía «Sincronizado» y su cambio se perdía. Además, el borrado ignoraba `baseVersion` y podía borrar una versión más nueva. | La versión decide primero (409 ante `baseVersion` obsoleta, también en `DELETED`). `occurredAt` solo ordena eventos sin versión. | Tests `laVersionPrevaleceSobreOccurredAt` y `borradoConVersionObsoletaDa409YNoBorra`; smoke paso 4. |
+| V4 | Media | **Resync hacía HTTP dentro de una transacción**, bloqueando la única conexión SQLite hasta 5 s. La reconciliación podía sobrescribir un ítem que el usuario acababa de editar (lectura y escritura no atómicas). | HTTP fuera de transacción; cada escritura relee el ítem y comprueba que sigue `CONFIRMED` dentro de su transacción. | Tests de reconciliación y resync. |
+| V5 | Media | **La primera carga tras el login daba 401**: el token se fijaba en un `useEffect` del padre, que React ejecuta *después* de los efectos de los hijos que ya lanzaban la petición. **Además, tras el login se mostraba «Página no encontrada»** (no había ruta `/callback`). | El token se fija durante el render; la ruta `/callback` redirige al catálogo. | Test `tras el login (/callback)… la PRIMERA petición ya lleva el Bearer`. |
+| V6 | Media | **Documentación contradictoria**: README, `curl.md` y Postman describían el modelo anterior (token inyectado por nginx, «UI sin login», sin rate limiting ni purga del outbox) y pedían una variable que ya no existe. Faltaban la estrategia de autenticación, qué pasa en cada escenario, qué no se implementó y cómo evolucionaría. | README reescrito (cumplimiento, escenarios, OWASP, trade-offs, supuestos, limitaciones, evolución); `curl.md` y Postman con el login OIDC. | Revisión manual; los comandos de `curl.md` son los que ejecuta el smoke. |
+| V7 | Media | **Validación laxa**: los campos desconocidos se ignoraban en silencio (p. ej. un cliente podía enviar `syncStatus`). | `fail-on-unknown-properties` en el Producer; `ItemRequest` estricto en el Consumer → 400. | Tests `payloadConCamposDesconocidosSeRechaza` y de seguridad del Consumer. |
+| V8 | Baja | Contratos duplicados en cada módulo (podían divergir); el Consumer no verificaba que entendía la respuesta del Producer. | Fuente única `contracts/` cargada por ambos módulos; test de deserialización del contrato en el Consumer. | Tests de contrato en ambos lados. |
+| V9 | Baja | Métricas accesibles a cualquier usuario; realm con password grant en el cliente del SPA; rol `admin` descrito con un permiso inexistente; `KEYCLOAK_ADMIN_PASSWORD` con valor por defecto `admin` en compose; Keycloak sin healthcheck (la UI podía arrancar antes que el IdP). | Métricas solo `admin`; cliente `catalogo-cli` separado para desarrollo; descripción corregida; variable obligatoria; healthcheck y `depends_on`. | Test `lasMetricasDeSincronizacionSoloParaAdministradores`; smoke. |
+| V11 | Media | **El Consumer podía saltarse el webhook**: la API de administración del Producer aceptaba el mismo token que el webhook, así que el Consumer podía escribir directamente en la fuente de verdad. | Dos credenciales con roles: `SERVICE` (Consumer: solo webhook y lectura) y `ADMIN` (`PRODUCER_ADMIN_TOKEN`, que solo conoce el Producer: escritura directa y métricas). El Producer no arranca si ambas coinciden. | Tests `separacionDePrivilegiosEntreConsumerYAdministracion` y `lasCredencialesDeServicioYAdministracionDebenSerDistintas`; smoke (403 del Consumer en escritura directa). |
+| V12 | Media | **Contraseñas de los usuarios de demo versionadas** en el realm de Keycloak (`demo/demo`, `admin/admin`). | El realm solo lleva los placeholders `${DEMO_USER_PASSWORD}` y `${DEMO_ADMIN_PASSWORD}`, que Keycloak resuelve desde el entorno al importarlo. | Login real en el E2E de navegador y en el smoke con las contraseñas de `.env`. |
+| V13 | Media | **La UI nunca se había probado en un navegador real**: el login OIDC con PKCE y la experiencia solo tenían tests unitarios simulados. | E2E con Playwright (Chromium, instalación ligera sin imagen Docker) contra el stack real, en el CI. | En local, sin descargar navegadores: el flujo Authorization Code + PKCE se ejecutó con `curl` contra el Keycloak real (redirección a `/callback`, canje con `code_verifier`, 200 del Consumer vía nginx; password grant del SPA rechazado; contraseña antigua rechazada). **El spec de Playwright no se ejecutó en esta máquina.** **Revisión visual manual** en navegador del flujo completo (login, sincronizar, editar, filtros, registro, tema oscuro, móvil): todo correcto salvo V14. |
+| V14 | Baja | **La lupa del buscador tapaba las primeras letras**: la regla genérica `input[type='search']`, declarada después y con la misma especificidad, anulaba el `padding-left` reservado para el icono. | Selector más específico (`.search input[type='search']`). | Detectado en la revisión visual manual; CSS servido verificado. |
+| V10 | Baja | Faltaban filtros por tipo y por estado de sincronización, una consulta del registro de eventos fallidos y métricas de reconciliación; la readiness no comprobaba la BD. | `?tipo=`, `?sync=`, `GET /api/sync/events`, pantalla *Sincronización*, `sync_reconcile_*`, readiness con `db`. | Tests de filtros, registro, métricas y health. |
