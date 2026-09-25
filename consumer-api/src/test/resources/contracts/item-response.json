@@ -1,0 +1,10 @@
+{
+  "id": "0b9e1c2a-1f4d-4b8e-9c3a-2d5f6a7b8c90",
+  "nombre": "Café molido",
+  "descripcion": "500 g",
+  "estado": "ACTIVO",
+  "tipo": "PRODUCTO",
+  "fechaCreacion": "2026-01-01T00:00:00Z",
+  "fechaActualizacion": "2026-01-01T00:00:00Z",
+  "version": 1
+}

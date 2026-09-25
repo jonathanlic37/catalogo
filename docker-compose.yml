@@ -1,0 +1,120 @@
+# docker-compose.yml
+name: catalogo
+
+# Rotación de logs: sin esto el driver json-file crece sin límite.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Endurecimiento común de los servicios Java: sistema de ficheros de solo lectura (solo /data,
+# /backups y /tmp son escribibles), sin capabilities ni escalada de privilegios, y con límites
+# de memoria y procesos para que un fallo no arrastre al host.
+x-java-service: &java-service
+  read_only: true
+  tmpfs:
+    - /tmp:rw,exec,nosuid,size=128m   # exec: sqlite-jdbc extrae su librería nativa aquí
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 512m
+  pids_limit: 200
+  stop_grace_period: 30s              # deja terminar los webhooks en curso (shutdown graceful)
+  logging: *default-logging
+  restart: unless-stopped
+
+services:
+  producer-api:
+    <<: *java-service
+    build: ./producer-api
+    environment:
+      SERVER_PORT: 8080
+      DB_PATH: /data/producer.db
+      BACKUP_DIR: /backups
+      BACKUP_ENABLED: ${BACKUP_ENABLED:-true}
+      BACKUP_INTERVAL_MS: ${BACKUP_INTERVAL_MS:-21600000}
+      BACKUP_KEEP: ${BACKUP_KEEP:-8}
+      CONSUMER_TO_PRODUCER_TOKEN: ${CONSUMER_TO_PRODUCER_TOKEN:?definir en .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
+    volumes:
+      - producer-data:/data
+      - producer-backups:/backups
+    ports:
+      - "127.0.0.1:${PRODUCER_PORT:-8082}:8080"
+    # `backend` es interna (Docker no publica puertos en redes internas); `debug` existe solo
+    # para poder consultar la fuente de verdad desde el host (127.0.0.1).
+    networks: [backend, debug]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  consumer-api:
+    <<: *java-service
+    build: ./consumer-api
+    depends_on:
+      producer-api:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      DB_PATH: /data/consumer.db
+      PRODUCER_BASE_URL: http://producer-api:8080
+      CONSUMER_TO_PRODUCER_TOKEN: ${CONSUMER_TO_PRODUCER_TOKEN:?definir en .env}
+      FRONTEND_TO_CONSUMER_TOKEN: ${FRONTEND_TO_CONSUMER_TOKEN:?definir en .env}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
+      SYNC_MAX_RETRIES: ${SYNC_MAX_RETRIES:-5}
+      SYNC_RETRY_INTERVAL_MS: ${SYNC_RETRY_INTERVAL_MS:-10000}
+      SYNC_CONFLICT_POLICY: ${SYNC_CONFLICT_POLICY:-MANUAL}
+    volumes:
+      - consumer-data:/data
+    ports:
+      - "127.0.0.1:${CONSUMER_PORT:-8081}:8080"
+    networks: [backend, frontend]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    depends_on:
+      consumer-api:
+        condition: service_healthy
+    environment:
+      CONSUMER_UPSTREAM: http://consumer-api:8080
+      FRONTEND_TO_CONSUMER_TOKEN: ${FRONTEND_TO_CONSUMER_TOKEN:?definir en .env}
+    # La UI no tiene autenticación de usuario (nginx inyecta el token del servicio), por lo que
+    # por defecto solo escucha en localhost. Para exponerla en la red, pon FRONTEND_BIND=0.0.0.0
+    # únicamente detrás de un proxy con TLS y autenticación.
+    ports:
+      - "${FRONTEND_BIND:-127.0.0.1}:${FRONTEND_PORT:-8088}:8080"
+    networks: [frontend]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    pids_limit: 100
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  backend:
+    internal: true
+  frontend:
+  debug:
+
+volumes:
+  producer-data:
+  producer-backups:
+  consumer-data:

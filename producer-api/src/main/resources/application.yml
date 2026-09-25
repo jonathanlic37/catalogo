@@ -1,0 +1,64 @@
+# producer-api/src/main/resources/application.yml
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json
+    min-response-size: 1024
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+spring:
+  application:
+    name: producer-api
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  task:
+    scheduling:
+      pool:
+        size: 2
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:./producer.db}?journal_mode=WAL&busy_timeout=5000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+app:
+  security:
+    consumer-token: ${CONSUMER_TO_PRODUCER_TOKEN}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8088}
+  idempotency:
+    retention-days: ${IDEMPOTENCY_RETENTION_DAYS:7}
+  backup:
+    enabled: ${BACKUP_ENABLED:true}
+    dir: ${BACKUP_DIR:./backups}
+    interval-ms: ${BACKUP_INTERVAL_MS:21600000}
+    initial-delay-ms: ${BACKUP_INITIAL_DELAY_MS:60000}
+    keep: ${BACKUP_KEEP:8}

@@ -1,0 +1,101 @@
+// consumer-api/src/main/java/com/catalogo/consumer/sync/ReconcileService.java
+package com.catalogo.consumer.sync;
+
+import com.catalogo.consumer.dto.ItemView;
+import com.catalogo.consumer.dto.ProducerItem;
+import com.catalogo.consumer.model.Item;
+import com.catalogo.consumer.model.SyncStatus;
+import com.catalogo.consumer.repository.ItemRepository;
+import com.catalogo.consumer.repository.OutboxEventRepository;
+import com.catalogo.consumer.service.ApiException;
+import com.catalogo.consumer.service.ItemMapper;
+import java.time.Instant;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestClientException;
+
+/**
+ * Mantiene la réplica alineada con la fuente de verdad: siembra una réplica vacía, recoge cambios
+ * hechos directamente en el Producer y permite descartar un cambio local rechazado (resync).
+ * Nunca toca ítems con cambios locales PENDING/FAILED.
+ */
+@Service
+public class ReconcileService {
+
+    private static final Logger log = LoggerFactory.getLogger(ReconcileService.class);
+
+    private final ItemRepository repository;
+    private final OutboxEventRepository outbox;
+    private final ProducerWebhookClient client;
+
+    public ReconcileService(ItemRepository repository, OutboxEventRepository outbox, ProducerWebhookClient client) {
+        this.repository = repository;
+        this.outbox = outbox;
+        this.client = client;
+    }
+
+    @Scheduled(initialDelay = 3000, fixedDelayString = "${app.sync.reconcile-interval-ms}")
+    public void scheduled() {
+        try {
+            reconcileAll();
+        } catch (RestClientException | IllegalStateException e) {
+            log.warn("Reconciliación omitida: Producer no disponible");
+        }
+    }
+
+    public void reconcileAll() {
+        Instant fetchStartedAt = Instant.now();
+        Set<String> remoteIds = new HashSet<>();
+
+        client.forEachPage(page -> {
+            for (ProducerItem r : page) {
+                remoteIds.add(r.id());
+                Optional<Item> local = repository.findById(r.id());
+                if (local.isEmpty()) {
+                    repository.save(ItemMapper.applyRemote(new Item(), r));
+                } else if (local.get().getSyncStatus() == SyncStatus.CONFIRMED
+                        && r.version() > local.get().getVersion()) {
+                    repository.save(ItemMapper.applyRemote(local.get(), r));
+                }
+            }
+        });
+
+        // Un ítem CONFIRMED ausente de la lista pudo borrarse en el Producer, o haberse desplazado
+        // entre páginas mientras se recorría. Se confirma con una consulta puntual antes de borrar,
+        // y se ignoran los modificados tras iniciar el recorrido (p. ej. recién creados).
+        for (String id : repository.findIdsByStatusUpdatedBefore(SyncStatus.CONFIRMED, fetchStartedAt)) {
+            if (!remoteIds.contains(id) && client.fetch(id).isEmpty()) {
+                repository.deleteById(id);
+            }
+        }
+    }
+
+    /** Descarta el cambio local de un ítem FAILED, retira sus eventos del outbox y recupera el Producer. */
+    @Transactional
+    public ItemView resync(String id) {
+        Item local = repository.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Ítem no encontrado"));
+        if (local.getSyncStatus() != SyncStatus.FAILED) {
+            throw new ApiException(HttpStatus.CONFLICT, "Solo se pueden resincronizar ítems con sincronización fallida");
+        }
+        Optional<ProducerItem> remote;
+        try {
+            remote = client.fetch(id);
+        } catch (RestClientException | IllegalStateException e) {
+            throw new ApiException(HttpStatus.BAD_GATEWAY, "Producer no disponible");
+        }
+        outbox.deleteByItemId(id);
+        if (remote.isEmpty()) {
+            repository.delete(local);
+            return null;
+        }
+        return ItemView.from(repository.save(ItemMapper.applyRemote(local, remote.get())));
+    }
+}

@@ -1,0 +1,31 @@
+# --- Secretos y configuración local ---
+.env
+.env.*.local
+
+# --- Bases de datos SQLite (se crean en runtime) ---
+*.db
+*.db-shm
+*.db-wal
+
+# --- Artefactos de build (dependencias generadas) ---
+target/
+dist/
+build/
+
+# --- Dependencias ---
+node_modules/
+
+# --- Logs ---
+*.log
+
+# --- IDE / editor ---
+.idea/
+.vscode/
+*.iml
+.settings/
+.classpath
+.project
+
+# --- Sistema operativo ---
+.DS_Store
+Thumbs.db

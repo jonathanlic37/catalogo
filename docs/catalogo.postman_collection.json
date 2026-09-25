@@ -1,0 +1,68 @@
+{
+  "info": {
+    "name": "Catálogo — sincronización por webhooks",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "consumer", "value": "http://localhost:8081" },
+    { "key": "producer", "value": "http://localhost:8082" },
+    { "key": "frontendToken", "value": "cambiar-token-frontend-a-consumer-0000000000000000" },
+    { "key": "producerToken", "value": "cambiar-token-consumer-a-producer-0000000000000000" },
+    { "key": "itemId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Consumer — crear ítem (202 PENDING)",
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('itemId', pm.response.json().id);"] } }],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "url": "{{consumer}}/api/items",
+        "body": { "mode": "raw", "raw": "{\"nombre\":\"Café molido\",\"descripcion\":\"500 g\",\"estado\":\"ACTIVO\"}" }
+      }
+    },
+    {
+      "name": "Consumer — listar",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items" }
+    },
+    {
+      "name": "Consumer — obtener por id",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items/{{itemId}}" }
+    },
+    {
+      "name": "Consumer — editar (202)",
+      "request": {
+        "method": "PUT",
+        "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "url": "{{consumer}}/api/items/{{itemId}}",
+        "body": { "mode": "raw", "raw": "{\"nombre\":\"Café molido 1 kg\",\"descripcion\":\"1 kg\",\"estado\":\"ACTIVO\"}" }
+      }
+    },
+    {
+      "name": "Consumer — eliminar (202)",
+      "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{frontendToken}}" }], "url": "{{consumer}}/api/items/{{itemId}}" }
+    },
+    {
+      "name": "Producer — obtener ítem (fuente de verdad)",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{producerToken}}" }], "url": "{{producer}}/api/items/{{itemId}}" }
+    },
+    {
+      "name": "Producer — webhook CREATED (repetir con la misma clave prueba idempotencia)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{producerToken}}" },
+          { "key": "Idempotency-Key", "value": "clave-fija-de-prueba-001" },
+          { "key": "X-Event-Type", "value": "CREATED" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "url": "{{producer}}/webhooks/catalogo",
+        "body": { "mode": "raw", "raw": "{\"id\":\"11111111-2222-3333-4444-555555555555\",\"nombre\":\"Directo\",\"descripcion\":\"vía webhook\",\"estado\":\"ACTIVO\"}" }
+      }
+    },
+    {
+      "name": "Consumer — sin token (401)",
+      "request": { "method": "GET", "header": [], "url": "{{consumer}}/api/items" }
+    }
+  ]
+}

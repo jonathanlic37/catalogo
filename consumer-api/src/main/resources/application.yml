@@ -1,0 +1,68 @@
+# consumer-api/src/main/resources/application.yml
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,application/problem+json
+    min-response-size: 1024
+  error:
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+
+spring:
+  application:
+    name: consumer-api
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  task:
+    scheduling:
+      pool:
+        size: 2
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:./consumer.db}?journal_mode=WAL&busy_timeout=5000
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+  jpa:
+    database-platform: org.hibernate.community.dialect.SQLiteDialect
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  jackson:
+    default-property-inclusion: non_null
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+app:
+  producer:
+    base-url: ${PRODUCER_BASE_URL:http://localhost:8082}
+    token: ${CONSUMER_TO_PRODUCER_TOKEN}
+    connect-timeout-ms: 3000
+    read-timeout-ms: 5000
+  security:
+    frontend-token: ${FRONTEND_TO_CONSUMER_TOKEN}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8088}
+  sync:
+    max-retries: ${SYNC_MAX_RETRIES:5}
+    retry-interval-ms: ${SYNC_RETRY_INTERVAL_MS:10000}
+    reconcile-interval-ms: ${SYNC_RECONCILE_INTERVAL_MS:60000}
+    # MANUAL | PRODUCER_WINS | CONSUMER_WINS
+    conflict-policy: ${SYNC_CONFLICT_POLICY:MANUAL}
+    metrics-interval-ms: ${SYNC_METRICS_INTERVAL_MS:15000}
