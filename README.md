@@ -14,6 +14,28 @@ Luego abre **<http://localhost:8088>** e inicia sesión con **`demo` / `demo-dev
 `.env`: `DEMO_USER_PASSWORD`, `DEMO_ADMIN_PASSWORD`). El primer arranque
 compila las imágenes y tarda unos minutos.
 
+### Recorrido rápido para el evaluador (≈ 5 minutos)
+
+1. **Arrancar:** los dos comandos de arriba; `docker compose ps` debe mostrar los 4 servicios `healthy`.
+2. **Ver el flujo completo automatizado:** `./scripts/smoke-test.sh` recorre los criterios de
+   aceptación y los cuatro escenarios del enunciado (Producer caído, webhook duplicado, conflicto y
+   reinicio del Consumer) contra el stack real, y termina con `SMOKE OK`.
+3. **Verlo en la interfaz:** crea un ítem en el Producer con el comando de
+   [`docs/curl.md`](docs/curl.md) §1, pulsa **«Sincronizar ahora»**, edítalo y observa
+   «Pendiente de confirmación» → «Sincronizado». La tabla de
+   [§5](#cómo-demostrar-cada-paso) da cada paso del enunciado a mano y con su prueba automática.
+4. **Dónde está cada cosa que se evalúa:**
+
+| Criterio de la rúbrica | Dónde mirarlo |
+|---|---|
+| Flujo funcional y experiencia mínima | [§5](#5-flujo-de-sincronización), la UI y el E2E de navegador (`e2e/`) |
+| Separación Producer/Consumer y SSoT | [§3](#3-arquitectura) y [cómo se cumple la regla SSoT](#cómo-se-cumple-la-regla-ssot) |
+| Webhook, sincronización e idempotencia | [§6 Qué ocurre si…](#6-qué-ocurre-si) y [§7](#7-errores-duplicados-y-fallos-de-sincronización) |
+| Seguridad y configuración | [§8](#8-seguridad-y-estrategia-de-autenticación) (estrategia de autenticación y OWASP) y [§9](#9-configuración) |
+| Tests automatizados | [§11](#11-tests-automatizados) |
+| Docker y documentación | [§2](#2-puesta-en-marcha) y este README |
+| Iniciativa y justificación de decisiones | [Priorización](#priorización-núcleo-del-enunciado-y-extras), [§12 D-01…D-17](#12-decisiones-técnicas-y-trade-offs), [§13](#13-supuestos) y [`docs/AUDITORIA.md`](docs/AUDITORIA.md) |
+
 ---
 
 ## Índice
