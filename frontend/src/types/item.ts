@@ -52,4 +52,22 @@ export interface ListParams {
   size: number;
   q: string;
   estado: '' | Estado;
+  tipo?: '' | TipoContenido;
+  sync?: '' | SyncStatus;
+}
+
+export type OutboxStatus = 'PENDING' | 'SENT' | 'FAILED';
+
+/** Entrada del registro de eventos de sincronización (outbox del Consumer). */
+export interface SyncEvent {
+  id: string;
+  itemId: string;
+  eventType: PendingOperation;
+  status: OutboxStatus;
+  attempts: number;
+  lastError?: string;
+  occurredAt: string;
+  createdAt: string;
+  nextAttemptAt?: string;
+  sentAt?: string;
 }

@@ -1,7 +1,10 @@
 // frontend/src/hooks/useItems.ts
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createItem, deleteItem, fetchItem, fetchItemsPage, fetchSummary, reconcileNow, resyncItem, retryItem, updateItem } from '../api/items';
-import type { Item, ItemInput, ListParams, Page } from '../types/item';
+import {
+  createItem, deleteItem, fetchItem, fetchItemsPage, fetchSummary, fetchSyncEvents, reconcileNow, resyncItem, retryItem,
+  updateItem,
+} from '../api/items';
+import type { Item, ItemInput, ListParams, OutboxStatus, Page } from '../types/item';
 
 const POLL_MS = 1500;
 
@@ -12,7 +15,19 @@ const keys = {
   lists: ['items', 'list'] as const,
   summary: ['items', 'summary'] as const,
   detail: (id: string | undefined) => ['items', 'detail', id] as const,
+  events: (status: string, page: number) => ['items', 'events', status, page] as const,
 };
+
+/** Registro de eventos de sincronización (outbox). Refresca mientras haya eventos pendientes visibles. */
+export function useSyncEvents(status: '' | OutboxStatus, page: number, size = 25) {
+  return useQuery({
+    queryKey: keys.events(status, page),
+    queryFn: () => fetchSyncEvents(status, page, size),
+    placeholderData: keepPreviousData,
+    refetchInterval: (query) =>
+      query.state.data?.content.some((e) => e.status === 'PENDING') ? POLL_MS : false,
+  });
+}
 
 /**
  * Página del catálogo. Mientras algún ítem visible esté PENDING (cambio aún no confirmado por el

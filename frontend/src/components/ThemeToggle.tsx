@@ -4,8 +4,9 @@ import { useState } from 'react';
 
 type Theme = 'light' | 'dark';
 
+// matchMedia puede no existir (navegadores antiguos, entornos de test): se asume tema claro.
 const systemTheme = (): Theme =>
-  window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 
 const currentTheme = (): Theme =>
   (document.documentElement.dataset.theme as Theme | undefined) ?? systemTheme();

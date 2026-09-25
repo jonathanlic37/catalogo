@@ -137,6 +137,11 @@ a { color: inherit; }
 }
 .brand-name { font-family: var(--font-head); font-weight: 600; font-size: 1.15rem; letter-spacing: -0.01em; }
 .brand-sub { display: block; font-size: 0.72rem; color: var(--muted); margin-top: -2px; }
+.topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+.user-chip { font-size: 0.82rem; color: var(--muted); max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-screen { max-width: 420px; margin: 4rem auto; padding: 2rem; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+.auth-screen h1 { margin: 0; }
+.auth-screen p { color: var(--muted); margin: 0; }
 
 main { max-width: 1120px; margin: 0 auto; padding: 2rem 1rem 4rem; }
 
@@ -189,6 +194,19 @@ main { max-width: 1120px; margin: 0 auto; padding: 2rem 1rem 4rem; }
 .stat-icon.tone-fail { background: var(--fail-bg); color: var(--fail-fg); }
 .stat-value { font-family: var(--font-head); font-size: 1.65rem; font-weight: 600; line-height: 1; }
 .stat-label { font-size: 0.82rem; color: var(--muted); margin-top: 0.2rem; }
+/* Tarjetas que actúan como atajo de filtro */
+.stat-button { font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease; }
+.stat-button:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.stat-button.active { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+
+/* Navegación de la barra superior */
+.nav-link { display: inline-flex; align-items: center; gap: 0.4rem; min-height: 40px; padding: 0 0.7rem;
+  border-radius: var(--radius-sm); color: var(--muted); text-decoration: none; font-weight: 500;
+  transition: background-color 0.18s ease, color 0.18s ease; }
+.nav-link:hover { background: var(--accent-soft); color: var(--accent); }
+.nav-link.active { color: var(--accent); background: var(--accent-soft); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.85rem; }
 
 /* ---------- Banner de sincronización ---------- */
 .banner {
@@ -204,7 +222,20 @@ main { max-width: 1120px; margin: 0 auto; padding: 2rem 1rem 4rem; }
 .filters { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem; }
 .search { position: relative; flex: 1 1 260px; }
 .search svg { position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
-.search input { padding-left: 2.6rem; }
+/* Más específica que la regla genérica de input[type='search'] (definida después), para que el
+   hueco de la lupa no se pierda y el texto no quede detrás del icono. */
+.search input[type='search'] { padding-left: 2.6rem; }
+.search svg { z-index: 1; }
+
+.select {
+  min-height: 44px; padding: 0.55rem 2.2rem 0.55rem 0.85rem; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); font: 400 0.95rem var(--font-body);
+  cursor: pointer; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.select:hover { border-color: var(--muted); }
+.select:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--ring); }
 
 input[type='text'], input[type='search'], textarea {
   width: 100%; min-height: 44px; padding: 0.6rem 0.85rem;
@@ -336,6 +367,8 @@ dialog.confirm p { color: var(--muted); margin: 0.5rem 0 1.4rem; }
   .cell-actions { text-align: left; margin-top: 0.5rem; display: flex; gap: 0.25rem; }
   .form-card { padding: 1.25rem; }
   .brand-sub { display: none; }
+  .nav-label, .user-chip { display: none; }
+  .select { flex: 1 1 45%; }
 }
 @media (max-width: 380px) {
   .stats { grid-template-columns: 1fr; }
