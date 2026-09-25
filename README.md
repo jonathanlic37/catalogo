@@ -248,6 +248,23 @@ Los pasos siguen el flujo del enunciado:
 10. **El frontend lo muestra.** Mientras haya ítems pendientes, la UI consulta cada 1,5 s, y la
     insignia pasa de «Pendiente de confirmación» a «Sincronizado».
 
+### Cómo demostrar cada paso
+
+| Paso | A mano | Prueba automática que lo verifica |
+|---|---|---|
+| 1. Crear en el Producer | `curl -X POST $PRODUCER/api/items` con el token de administración ([`docs/curl.md`](docs/curl.md) §1) o Postman («1. Producer — crear ítem»). El Producer no tiene pantalla: el enunciado pide interfaz solo para el Consumer. | E2E (preparación), smoke bloque 1 |
+| 2. El Consumer sincroniza | Botón **«Sincronizar ahora»** en la UI (o esperar ≤ 60 s). | E2E paso «2-3», smoke bloque 1, test `reconciliacion*` |
+| 3. Aparece en React | Buscar el nombre en la lista: aparece «Sincronizado». | E2E paso «2-3» |
+| 4–5. Editar desde la UI | Icono de lápiz → cambiar el nombre → **Guardar**. | E2E paso «4-10», test `ItemForm` |
+| 6. Webhook autenticado | Pantalla **Sincronización** → filtro «Enviados»: aparece el evento de edición. | test `crearEnviaWebhook*`, smoke bloque 2 |
+| 7–8. El Producer valida, aplica y responde | `curl $PRODUCER/api/items/{id}` con el token del Consumer: nombre nuevo y `version` + 1. | E2E paso «4-10» (comprueba versión 2), smoke bloque 2 |
+| 9–10. Proyección y UI actualizadas | En uno o dos segundos la insignia pasa de «Pendiente de confirmación» a «Sincronizado» con el dato nuevo. | E2E paso «4-10», smoke bloque 2 |
+
+**Sincronización y refresco no son push.** El paso 2 es una consulta periódica (60 s, o al instante
+con el botón) porque el Producer no notifica a sus consumidores; el paso 10 es un sondeo cada
+1,5 s, activo solo mientras hay cambios pendientes. Ambas decisiones mantienen el Producer
+desacoplado y el sistema simple; la alternativa con eventos (broker, SSE/WebSocket) está en §15.
+
 ## 6. Qué ocurre si…
 
 | Situación | Comportamiento |
