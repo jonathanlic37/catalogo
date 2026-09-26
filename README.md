@@ -115,7 +115,7 @@ trabajo se ordenó en tres niveles, y cada nivel se cerró (con tests) antes de 
 
 | Extra | Qué riesgo cubre | Coste | Cómo prescindir de él |
 |---|---|---|---|
-| **Keycloak (OIDC)** para los usuarios | Sin login, cualquiera que alcanzara la UI podía modificar el catálogo, y el token viajaba inyectado por un proxy. OIDC da identidad real sin tokens en el bundle. El enunciado no lo exige; se eligió frente a un token estático de usuario por ser la opción más segura sin programar gestión de usuarios. | +1 contenedor, ~1 min más de arranque | Sustituir el resource server del Consumer por un Bearer estático (el patrón ya existe en el Producer) y quitar el servicio `auth`. |
+| **Keycloak (OIDC)** para los usuarios | Sin login, cualquiera que alcanzara la UI podía modificar el catálogo, y el token viajaba inyectado por un proxy. OIDC da identidad real sin tokens en el bundle. El enunciado no lo exige; se eligió frente a un token estático de usuario por ser la opción más segura sin programar gestión de usuarios. | +1 contenedor, ~1 min más de arranque | Cambiar la seguridad del Consumer a un Bearer estático (el patrón ya existe en el Producer), sustituir el login del frontend (`frontend/src/auth`) y quitar el servicio `auth`. La sincronización no se ve afectada. |
 | **Credenciales separadas** en el Producer | Con una sola credencial, el Consumer podía escribir en la SSoT saltándose el webhook. | Una variable más | — (es parte de la regla SSoT). |
 | **Copias de seguridad** del Producer | La SSoT era un único fichero SQLite sin copia. | Un volumen | `BACKUP_ENABLED=false`. |
 | **Rate limiting** en nginx | Abuso o bucles del cliente contra la API. | Ninguno apreciable | Subir `RATE_LIMIT_RATE`. |
@@ -136,10 +136,11 @@ evaluar por sí solo.
 
 Los **extras** (nivel 3) se añadieron después y no forman parte del alcance mínimo. Ninguno
 condiciona el flujo principal: se pueden ignorar, desactivar o quitar, como indica la tabla anterior.
-Lo más costoso de ese nivel es Keycloak, que alarga el primer arranque; si solo interesa evaluar la
-sincronización, basta sustituir la autenticación del Consumer por un token estático, como ya hace el
-Producer, y quitar el servicio `auth`. La solución se construyó de modo que ese recorte no obligue a
-tocar la lógica de sincronización.
+Lo más costoso de ese nivel es Keycloak, que alarga el primer arranque. Quitarlo es un cambio
+acotado pero real, en dos sitios: la configuración de seguridad del Consumer (usar un Bearer estático,
+como ya hace el Producer) y el login del frontend (`frontend/src/auth`), además de retirar el servicio
+`auth` de compose. **La lógica de sincronización (outbox, webhook, idempotencia, conflictos) no
+depende de la autenticación de usuarios y no habría que tocarla.**
 
 ## 2. Puesta en marcha
 
