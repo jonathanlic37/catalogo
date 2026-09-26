@@ -51,6 +51,7 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config -q
+          docker compose -f docker-compose.yml -f docker-compose.tls.yml config -q
 
   e2e:
     name: Smoke end-to-end

@@ -358,6 +358,16 @@ curl -X POST http://localhost:8082/api/items \
         está versionada (Flyway, <code>db/migration</code>) y se aplica sola al arrancar; si no coincide con la que espera
         la aplicación, esta no arranca en lugar de trabajar sobre datos inconsistentes. Para empezar de cero:
         <code>docker compose down -v</code>.</p>
+      <h3>Acceso cifrado (HTTPS)</h3>
+      <p>Opcional. Genera un certificado de desarrollo y arranca con el fichero TLS; la aplicación queda en
+        <a href="https://localhost:8443">https://localhost:8443</a> (el navegador pedirá aceptar el certificado la primera vez):</p>
+      <pre><code>./scripts/gen-dev-cert.sh
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build</code></pre>
+      <h3>Cambiar los tokens del Producer sin cortar el servicio</h3>
+      <p>En <code>.env</code>, copia el valor actual a <code>CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS</code> (o
+        <code>PRODUCER_ADMIN_TOKEN_PREVIOUS</code>), pon el nuevo en la variable principal y ejecuta
+        <code>docker compose up -d</code>. Cuando todo funcione con el nuevo, vacía la variable <code>_PREVIOUS</code> y
+        repite el comando.</p>
       <h3>Más recursos</h3>
       <ul>
         <li><a href="api.html">Referencia de las APIs (Swagger)</a> — todos los endpoints de ambas APIs.</li>

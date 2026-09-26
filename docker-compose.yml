@@ -80,6 +80,9 @@ services:
       # Dos credenciales: la del Consumer (webhook + lectura) y la de administración (escritura directa).
       CONSUMER_TO_PRODUCER_TOKEN: ${CONSUMER_TO_PRODUCER_TOKEN:?definir en .env}
       PRODUCER_ADMIN_TOKEN: ${PRODUCER_ADMIN_TOKEN:?definir en .env}
+      # Solo durante una rotación de tokens (ver README §8): el valor anterior, aceptado temporalmente.
+      CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS: ${CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS:-}
+      PRODUCER_ADMIN_TOKEN_PREVIOUS: ${PRODUCER_ADMIN_TOKEN_PREVIOUS:-}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8088}
     volumes:
       - producer-data:/data          # SQLite de la fuente de verdad (volumen propio)

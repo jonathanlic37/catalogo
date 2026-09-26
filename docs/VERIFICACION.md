@@ -20,4 +20,6 @@
 
 **Actualización (Flyway):** Producer 23/23 y Consumer 26/26 con `ddl-auto=validate`. Arranque sobre los volúmenes existentes (baseline 0 → V1) y desde cero (`docker compose down -v`): 4/4 healthy y **SMOKE OK** en ambos casos.
 
+**Actualización (TLS y rotación de tokens):** Producer **24/24**. `docker compose -f docker-compose.yml -f docker-compose.tls.yml config -q` válido; con el overlay, 4/4 healthy, `https://localhost:8443` responde por TLS 1.3 con HTTP/2, CSP y `Strict-Transport-Security`, el puerto HTTP deja de publicarse y **Playwright 1/1** con `E2E_BASE_URL=https://localhost:8443`. Rotación en vivo: con `CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS`, el token anterior y el nuevo dan 200 y uno desconocido 401. De vuelta al modo normal (`up -d --build`): 4/4 healthy, **SMOKE OK** y **Playwright 1/1**. Total: 81.
+
 Las mismas suites se ejecutan en el CI (`.github/workflows/ci.yml`) en cada PR.

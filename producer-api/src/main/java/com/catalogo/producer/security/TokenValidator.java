@@ -29,6 +29,24 @@ public final class TokenValidator {
         return token;
     }
 
+    /**
+     * Ningún token aceptado puede repetirse: dos credenciales con privilegios distintos anularían la
+     * separación, y un token «anterior» igual al actual no sería una rotación.
+     */
+    public static void requireAllDistinct(java.util.List<String> tokens) {
+        if (new java.util.HashSet<>(tokens).size() != tokens.size()) {
+            throw new IllegalStateException("Los tokens del Producer (actuales y *_PREVIOUS) deben ser todos distintos");
+        }
+    }
+
+    /** Una ventana de rotación abierta debe cerrarse: se recuerda en el log en cada arranque. */
+    public static void warnRotationWindow(String consumerPrevious, String adminPrevious) {
+        if (!consumerPrevious.isBlank() || !adminPrevious.isBlank()) {
+            log.warn("Rotación de tokens en curso: se aceptan también los tokens *_PREVIOUS. "
+                    + "Vacíelos cuando todos los clientes usen el token nuevo");
+        }
+    }
+
     /** Dos credenciales con privilegios distintos no pueden compartir valor (anularía la separación). */
     public static void requireDistinct(String nameA, String a, String nameB, String b) {
         if (a != null && a.equals(b)) {

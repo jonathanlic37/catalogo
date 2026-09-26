@@ -79,7 +79,7 @@ compila las imágenes y tarda unos minutos.
 | Los errores de comunicación no se presentan como éxitos | Las escrituras responden **202 PENDING**. Solo pasan a *Sincronizado* con la confirmación del Producer. Los fallos se muestran como *Error de sincronización* con el motivo. | smoke paso 5, tests `siElProducerFalla*`, `rechazoDelProducerMarcaFailed*`, `SyncBadge.test` |
 | Los endpoints protegidos rechazan peticiones sin Bearer válido | 401 en Consumer (JWT OIDC), Producer y webhook (token de servicio). 403 si la credencial no tiene el privilegio: el token del Consumer no puede escribir directamente en el Producer. | smoke, tests `sinToken*`, `separacionDePrivilegios*` |
 | Se ejecuta desde cero con Docker Compose | `cp .env.example .env && docker compose up --build`, sin pasos manuales. El CI lo hace igual. | `.github/workflows/ci.yml` |
-| Pruebas automatizadas del flujo principal | 80 tests (23 Producer, 26 Consumer, 31 frontend), smoke E2E de API y **E2E de navegador (Playwright)** con login real en Keycloak. | §11 |
+| Pruebas automatizadas del flujo principal | 81 tests (24 Producer, 26 Consumer, 31 frontend), smoke E2E de API y **E2E de navegador (Playwright)** con login real en Keycloak. | §11 |
 
 Funcionalidades opcionales del enunciado, todas implementadas:
 
@@ -124,7 +124,7 @@ trabajo se ordenó en tres niveles, y cada nivel se cerró (con tests) antes de 
 | **Sistema de diseño propio** | Estados de sincronización claros y usables en móvil, tablet y POS táctil. | CSS propio, sin dependencias | — |
 | **Endurecimiento de contenedores** | Mínimo privilegio (solo lectura, sin capabilities, límites de memoria). | Ninguno en ejecución | Quitar las claves `x-java-service` de `docker-compose.yml`. |
 
-**Se descartó por alcance** (ver §14): broker de mensajes, varios Consumers, TLS, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
+**Se descartó por alcance** (ver §14): broker de mensajes, varios Consumers, TLS entre contenedores, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
 aparece como evolución en §15.
 
 **Alcance sugerido frente a alcance entregado.** El enunciado sugiere un máximo de 24 horas y no
@@ -170,6 +170,17 @@ chmod 600 .env
 ```
 
 Para parar: `docker compose down`. Para borrar también los datos: `docker compose down -v`.
+
+**Con TLS (opcional).** La UI se sirve en <https://localhost:8443> con un certificado autofirmado
+(el navegador pide aceptarlo una vez):
+
+```bash
+./scripts/gen-dev-cert.sh                                             # certs/ (no versionado)
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build
+```
+
+Al cambiar de modo hay que usar `--build` (el SPA lleva la URL de retorno OIDC) y, si el realm
+cambió, recrear Keycloak (`up -d --force-recreate auth`): solo lo importa al crear el contenedor.
 
 ## 3. Arquitectura
 
@@ -382,6 +393,7 @@ desacoplado y el sistema simple; la alternativa con eventos (broker, SSE/WebSock
 
 | Tramo | Mecanismo | Motivo |
 |---|---|---|
+| Navegador → **UI** | HTTP en `127.0.0.1:8088` por defecto; **TLS** (1.2/1.3, HTTP/2) en `127.0.0.1:8443` con `docker-compose.tls.yml`. nginx descifra en 8443 y reenvía al mismo servidor HTTP interno, que conserva CSP, cabeceras y límite de peticiones (la IP del cliente viaja en `X-Real-IP`). `Strict-Transport-Security` con `HSTS_MAX_AGE`: 0 en localhost, porque el navegador lo extendería a todo `localhost` (IdP incluido); 31536000 con un dominio real. | Cifrado en el único tramo que sale de la máquina sin tocar la configuración de la aplicación. Keycloak sigue en `http://localhost:8095`: los navegadores tratan `localhost` como origen seguro. |
 | Usuario → UI → **Consumer API** | **OAuth2/OIDC con Keycloak.** El SPA usa Authorization Code + PKCE (S256), cliente público y sin secreto. El Consumer es *resource server*: valida la firma JWT contra el JWKS, el `iss` y la expiración, y exige el rol de realm `user` o `admin`. | Identidad real de usuario sin guardar contraseñas en el sistema y sin ningún token en el bundle. El JWT vive en memoria y la sesión en `sessionStorage`. |
 | **Consumer → Producer** (webhook, lectura y reconciliación) | **Bearer token de servicio** (`CONSUMER_TO_PRODUCER_TOKEN`, rol `SERVICE`) comparado en tiempo constante. Solo puede enviar el webhook y leer. La aplicación no arranca con tokens de menos de 32 caracteres ni con marcadores sin sustituir. | Comunicación máquina a máquina en una red interna: suficiente y simple (el enunciado no exige OAuth). |
 | API de administración del **Producer** | **Credencial distinta** (`PRODUCER_ADMIN_TOKEN`, rol `ADMIN`): escritura directa, lectura y métricas. No sirve para el webhook, y el Producer no arranca si coincide con la del Consumer. | Mínimo privilegio: el Consumer **no puede** escribir en la fuente de verdad saltándose el webhook (403). Solo el Producer conoce el token de administración. |
@@ -391,6 +403,21 @@ Keycloak arranca con dos usuarios de demostración: `demo` (rol `user`) y `admin
 placeholders `${DEMO_USER_PASSWORD}` y `${DEMO_ADMIN_PASSWORD}`, que Keycloak resuelve al importarlo
 desde las variables de entorno. El cliente `catalogo-cli`, solo para desarrollo, permite obtener un token desde curl o
 Postman. El cliente del SPA **no** admite el password grant.
+
+### Rotación de los tokens del Producer
+
+Cada credencial admite un valor **anterior** opcional (`CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS`,
+`PRODUCER_ADMIN_TOKEN_PREVIOUS`) que el Producer acepta **con el mismo rol**, nunca con más. Rotar sin
+cortar el servicio:
+
+1. En `.env`, copiar el valor actual a `*_PREVIOUS` y poner el nuevo en la variable principal.
+2. `docker compose up -d`: el Producer arranca aceptando ambos, y el Consumer (o el cliente de
+   administración) pasa al nuevo. Ninguna petición en vuelo con el valor anterior falla.
+3. Vaciar `*_PREVIOUS` y `docker compose up -d` de nuevo. Mientras la ventana está abierta, el
+   Producer lo recuerda en el log en cada arranque.
+
+Ningún token puede repetirse entre actuales y anteriores, y los anteriores cumplen las mismas reglas
+(≥ 32 caracteres, sin marcadores). Cubierto por `rotacionAceptaElTokenAnteriorConSuMismoRolYNadaMas`.
 
 ### Requisitos mínimos del enunciado
 
@@ -414,7 +441,7 @@ Postman. El cliente del SPA **no** admite el password grant.
 | Riesgo | Mitigación |
 |---|---|
 | A01 Control de acceso roto | `denyAll` por defecto y roles por ruta (métricas solo `admin`). En el Producer, credenciales separadas: el Consumer solo puede usar el webhook. Las APIs no exponen nada sin autenticar salvo health. |
-| A02 Fallos criptográficos | JWT firmado y validado contra el JWKS. Comparación en tiempo constante del token de servicio. TLS en el proxy es evolución documentada. |
+| A02 Fallos criptográficos | JWT firmado y validado contra el JWKS. Comparación en tiempo constante de los tokens de servicio, con rotación sin corte. TLS 1.2/1.3 en el proxy con `docker-compose.tls.yml`. |
 | A03 Inyección | Consultas parametrizadas, `LIKE` escapado y validación de entrada. |
 | A04 Diseño inseguro | SSoT, idempotencia, concurrencia optimista y edición bloqueada con cambios pendientes. |
 | A05 Configuración insegura | Contenedores `read_only`, `cap_drop: ALL`, `no-new-privileges`, usuarios no root y límites de memoria. nginx con CSP estricta, `X-Frame-Options`, `nosniff`, `Referrer-Policy` y `server_tokens off`. Puertos solo en `127.0.0.1`. |
@@ -433,6 +460,8 @@ Todas las variables están comentadas en [`.env.example`](.env.example). Las pri
 | `FRONTEND_PORT`, `CONSUMER_PORT`, `PRODUCER_PORT`, `KEYCLOAK_PORT` | Puertos del host. |
 | `CONSUMER_TO_PRODUCER_TOKEN` | Token de servicio del Consumer: webhook y lectura (≥ 32 caracteres). |
 | `PRODUCER_ADMIN_TOKEN` | Token de administración del Producer: escritura directa. Debe ser distinto del anterior. |
+| `CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS`, `PRODUCER_ADMIN_TOKEN_PREVIOUS` | Solo durante una rotación: valor anterior aceptado con el mismo rol (§8). Vacíos por defecto. |
+| `TLS_PORT`, `HSTS_MAX_AGE` | Modo TLS (`docker-compose.tls.yml`): puerto HTTPS y `max-age` de HSTS. |
 | `DEMO_USER_PASSWORD`, `DEMO_ADMIN_PASSWORD` | Contraseñas de los usuarios de demostración del realm. |
 | `KEYCLOAK_ADMIN`, `KEYCLOAK_ADMIN_PASSWORD` | Consola de Keycloak. |
 | `OIDC_ISSUER`, `OIDC_JWK_SET_URI`, `OIDC_CLIENT_ID`, `OIDC_REDIRECT_URI` | OIDC del SPA y del resource server. |
@@ -510,7 +539,7 @@ Los tests de backend montan la raíz del repositorio porque los contratos viven 
 
 | Módulo | Tests | Cubren |
 |---|---|---|
-| `producer-api` | 23 (`WebhookIdempotencyTest`) | Webhook duplicado, webhooks concurrentes con la misma clave (un solo original, el resto replay, nunca 500), clave reutilizada con otro contenido (409), versión obsoleta en edición y borrado (409), prioridad de la versión sobre `occurredAt`, eventos fuera de orden, escritura directa, separación de privilegios entre las credenciales del Consumer y de administración (403), paginación, 401, validación sin stack trace, campos desconocidos rechazados, códigos estándar (400/415), **contrato** (acepta `webhook-created.json` y responde con la forma de `item-response.json`), purga de idempotencia, backup legible y validación de tokens. |
+| `producer-api` | 24 (`WebhookIdempotencyTest`) | Webhook duplicado, webhooks concurrentes con la misma clave (un solo original, el resto replay, nunca 500), clave reutilizada con otro contenido (409), versión obsoleta en edición y borrado (409), prioridad de la versión sobre `occurredAt`, eventos fuera de orden, escritura directa, separación de privilegios entre las credenciales del Consumer y de administración (403), rotación de tokens (el anterior conserva su rol y nada más), paginación, 401, validación sin stack trace, campos desconocidos rechazados, códigos estándar (400/415), **contrato** (acepta `webhook-created.json` y responde con la forma de `item-response.json`), purga de idempotencia, backup legible y validación de tokens. |
 | `consumer-api` | 26 (`SyncServiceWireMockTest`, `SyncProducerWinsTest`, `SyncConsumerWinsTest`, `OutboxBatchCutoffTest`) con el Producer simulado en WireMock | Alta → webhook (Bearer, Idempotency-Key, X-Event-Type) → `CONFIRMED`; edición con `baseVersion`; reintentos con la misma clave; Producer caído más allá de `SYNC_MAX_RETRIES` sigue pendiente y se confirma al volver; políticas `PRODUCER_WINS` y `CONSUMER_WINS` (rebase y tope de conflictos); rechazo → `FAILED` con su motivo (`CONFLICT`, `GONE`, `REJECTED`); borrado (y 404 idempotente); edición bloqueada si hay cambio pendiente; paginación, búsqueda y filtros (estado, tipo, sincronización); reconciliación (siembra, borrado seguro y manual); registro de eventos fallidos; métricas solo para admin; healthchecks; **contrato** en ambos sentidos; purga del outbox; corte del lote con el Producer caído; seguridad y errores estándar. |
 | `frontend` | 31 (Vitest + Testing Library) | Login OIDC (sin sesión no hay llamadas; tras `/callback` la primera petición ya lleva el Bearer), lista con estados de sincronización, paginación, búsqueda, filtros y atajos, reintentar solo cuando tiene sentido y descartar, aviso de reintento automático con el Producer caído, componentes del sistema de diseño, confirmación de borrado, reconciliación manual, formulario (validación local y del servidor, sin pisar lo que se escribe) y registro de eventos. |
 | E2E de API | `scripts/smoke-test.sh` | Stack real con los criterios de aceptación y escenarios de §6, incluida la separación de privilegios del Producer. |
@@ -582,17 +611,18 @@ indicada.
 | El catálogo tiene **decenas de miles de ítems** como mucho. | SQLite y reconciliación completa cada 60 s son suficientes. |
 | Las fechas se guardan en **UTC** y se intercambian en **ISO-8601**. | La UI las muestra en la zona horaria del navegador. |
 | Los relojes de los contenedores están **sincronizados**. | Solo afecta a eventos sin versión (D-04 no depende de relojes). |
-| Se ejecuta **en local**, sin TLS. | Todos los puertos en `127.0.0.1`; para exponerlo, un proxy con TLS delante (`FRONTEND_BIND`, §15). |
+| Se ejecuta **en local**; TLS es opcional. | Todos los puertos en `127.0.0.1`. Con `docker-compose.tls.yml` la UI va por HTTPS con un certificado autofirmado; para exponerla, un certificado de una CA y `FRONTEND_BIND` (§8). |
 | Navegador **moderno** (con `backdrop-filter` y `<dialog>`). | En navegadores sin desenfoque, las superficies se vuelven más opacas y el contenido sigue siendo legible. |
 
 ## 14. Limitaciones conocidas y lo que no se implementó
 
-- **Sin TLS** entre contenedores ni en la UI. Todo escucha en `127.0.0.1` y la red `backend` es
-  interna.
-- **Keycloak en modo desarrollo.** Usa H2 embebido y reimporta el realm en cada arranque, con los
+- **TLS solo en la UI y opcional** (`docker-compose.tls.yml`, certificado autofirmado). Entre
+  contenedores no hay TLS: la red `backend` es interna. Keycloak sigue en HTTP sobre `localhost`.
+- **Keycloak en modo desarrollo.** Usa H2 embebido e importa el realm al crear el contenedor, con los
   usuarios de demostración (contraseñas por variable de entorno). En producción usaría una BD
   propia y usuarios reales.
-- **Tokens estáticos** entre servicios (servicio y administración, ya separados), sin rotación.
+- **Tokens estáticos** entre servicios (servicio y administración, ya separados). Se rotan sin corte
+  con `*_PREVIOUS`, pero a mano: no caducan solos.
 - **No hay push** de cambios del Producer al Consumer: se usa reconciliación, O(N) cada minuto.
 - La **búsqueda** usa `lower()` de SQLite, que solo distingue mayúsculas y minúsculas ASCII.
 - Con `SYNC_CONFLICT_POLICY=MANUAL` el conflicto lo resuelve el usuario. No hay fusión de campos.
@@ -602,8 +632,8 @@ indicada.
 
 ## 15. Cómo evolucionaría
 
-1. **Seguridad:** TLS en el proxy. OAuth2 *client credentials* entre servicios, con rotación, en
-   lugar de los tokens estáticos. Administración del Producer con usuarios del IdP (rol `admin`)
+1. **Seguridad:** certificado de una CA y Keycloak también tras TLS. OAuth2 *client credentials*
+   entre servicios, con caducidad automática, en lugar de los tokens estáticos rotados a mano. Administración del Producer con usuarios del IdP (rol `admin`)
    en vez de un token. Keycloak con BD persistente.
 2. **Varios consumidores:** el Producer publicaría eventos de dominio (outbox propio → broker como
    Kafka o RabbitMQ). Cada Consumer los aplicaría por versión. La reconciliación quedaría como red
@@ -624,11 +654,12 @@ consumer-api/        Spring Boot · proyección, outbox, relay, reconciliación,
 frontend/            React + Vite · UI, OIDC (PKCE), nginx (proxy, CSP, rate limit)
 auth/                Realm de Keycloak (clientes, roles y usuarios de demo)
 contracts/           Contratos JSON Consumer↔Producer compartidos por los tests de ambos lados
-scripts/             smoke-test.sh (E2E de API), build-api-docs.py (genera docs/api.html) y hooks de git
+scripts/             smoke-test.sh (E2E de API), build-api-docs.py (genera docs/api.html), gen-dev-cert.sh y hooks de git
 e2e/                 Playwright · E2E de navegador con login real y capturas
 docs/                manual.html (manual de uso), api.html + openapi/ (Swagger de ambas APIs),
-                     curl.md, colección Postman y AUDITORIA.md
+                     curl.md, colección Postman, AUDITORIA.md y VERIFICACION.md
 docker-compose.yml   Orquestación · .env.example: configuración de ejemplo
+docker-compose.tls.yml  Overlay opcional: UI en https://localhost:8443
 ```
 
 La auditoría técnica, con los hallazgos, las mediciones de latencia y los riesgos residuales, está

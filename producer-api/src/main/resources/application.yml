@@ -71,6 +71,9 @@ app:
     consumer-token: ${CONSUMER_TO_PRODUCER_TOKEN}
     # Credencial de administración de la aplicación central: escritura directa + lectura + métricas.
     admin-token: ${PRODUCER_ADMIN_TOKEN}
+    # Rotación sin corte: token anterior aceptado temporalmente con el mismo rol (vacío = sin rotación).
+    consumer-token-previous: ${CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS:}
+    admin-token-previous: ${PRODUCER_ADMIN_TOKEN_PREVIOUS:}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:8088}
   idempotency:

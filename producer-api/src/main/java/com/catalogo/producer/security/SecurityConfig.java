@@ -2,7 +2,7 @@
 package com.catalogo.producer.security;
 
 import java.util.Arrays;
-import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +30,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  *       crear/editar/borrar ítems directamente, y ver métricas. No puede suplantar al Consumer en el
  *       webhook.</li>
  * </ul>
+ * Rotación sin corte: cada credencial admite un token anterior opcional ({@code *_PREVIOUS}) que se
+ * acepta con el mismo rol mientras los clientes pasan al nuevo; después se vacía.
  */
 @Configuration
 public class SecurityConfig {
@@ -40,11 +42,20 @@ public class SecurityConfig {
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http,
                                     @Value("${app.security.consumer-token}") String consumerToken,
-                                    @Value("${app.security.admin-token}") String adminToken) throws Exception {
-        Map<String, String> tokens = new LinkedHashMap<>();
-        tokens.put(SERVICE, TokenValidator.requireStrong("CONSUMER_TO_PRODUCER_TOKEN", consumerToken));
-        tokens.put(ADMIN, TokenValidator.requireStrong("PRODUCER_ADMIN_TOKEN", adminToken));
-        TokenValidator.requireDistinct("CONSUMER_TO_PRODUCER_TOKEN", consumerToken, "PRODUCER_ADMIN_TOKEN", adminToken);
+                                    @Value("${app.security.admin-token}") String adminToken,
+                                    @Value("${app.security.consumer-token-previous:}") String consumerPrevious,
+                                    @Value("${app.security.admin-token-previous:}") String adminPrevious) throws Exception {
+        List<Map.Entry<String, String>> tokens = new ArrayList<>();
+        tokens.add(Map.entry(SERVICE, TokenValidator.requireStrong("CONSUMER_TO_PRODUCER_TOKEN", consumerToken)));
+        tokens.add(Map.entry(ADMIN, TokenValidator.requireStrong("PRODUCER_ADMIN_TOKEN", adminToken)));
+        if (!consumerPrevious.isBlank()) {
+            tokens.add(Map.entry(SERVICE, TokenValidator.requireStrong("CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS", consumerPrevious)));
+        }
+        if (!adminPrevious.isBlank()) {
+            tokens.add(Map.entry(ADMIN, TokenValidator.requireStrong("PRODUCER_ADMIN_TOKEN_PREVIOUS", adminPrevious)));
+        }
+        TokenValidator.requireAllDistinct(tokens.stream().map(Map.Entry::getValue).toList());
+        TokenValidator.warnRotationWindow(consumerPrevious, adminPrevious);
 
         http
                 .csrf(AbstractHttpConfigurer::disable)

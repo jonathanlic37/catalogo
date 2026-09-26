@@ -18,6 +18,9 @@ info:
     | Servicio (Consumer) | `CONSUMER_TO_PRODUCER_TOKEN` | Enviar el webhook y leer. **No** puede escribir directamente (403). |
     | Administración | `PRODUCER_ADMIN_TOKEN` | Leer, crear/editar/borrar directamente y ver métricas. **No** puede usar el webhook (403). |
 
+    **Rotación sin corte:** cada credencial admite un valor anterior opcional
+    (`CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS`, `PRODUCER_ADMIN_TOKEN_PREVIOUS`) aceptado con el mismo rol.
+
     Los errores siguen RFC 7807 (`application/problem+json`) y nunca incluyen trazas.
 servers:
   - url: http://localhost:8082
