@@ -128,6 +128,19 @@ trabajo se ordenó en tres niveles, y cada nivel se cerró (con tests) antes de 
 versionadas, TLS, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
 aparece como evolución en §15.
 
+**Alcance sugerido frente a alcance entregado.** El enunciado sugiere un máximo de 24 horas y no
+espera una solución de producción. Lo que corresponde a ese alcance es el **núcleo** (nivel 1) y la
+**robustez de la sincronización** (nivel 2): las dos APIs, el webhook idempotente, la UI, Docker
+Compose, los tests y la documentación. Es lo que hay que leer para valorar el trabajo, y se puede
+evaluar por sí solo.
+
+Los **extras** (nivel 3) se añadieron después y no forman parte del alcance mínimo. Ninguno
+condiciona el flujo principal: se pueden ignorar, desactivar o quitar, como indica la tabla anterior.
+Lo más costoso de ese nivel es Keycloak, que alarga el primer arranque; si solo interesa evaluar la
+sincronización, basta sustituir la autenticación del Consumer por un token estático, como ya hace el
+Producer, y quitar el servicio `auth`. La solución se construyó de modo que ese recorte no obligue a
+tocar la lógica de sincronización.
+
 ## 2. Puesta en marcha
 
 Solo hace falta Docker con Compose v2. No hace falta Java ni Node en local.
