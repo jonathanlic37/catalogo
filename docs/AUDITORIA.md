@@ -60,7 +60,7 @@ las validaciones no exponen trazas.
 
 | Módulo | Primera auditoría | Tras la verificación contra el enunciado (§7) |
 |---|---|---|
-| `producer-api` | 5 → 11 | **22** |
+| `producer-api` | 5 → 11 | **23** (incluye `webhooksConcurrentesConLaMismaClaveNoDan500`) |
 | `consumer-api` | 4 → 12 | **26** (incluye `OutboxBatchCutoffTest`, que cubre L3, y las pruebas de las tres políticas de conflicto) |
 | `frontend` | 0 → 14 | **31** |
 | E2E de API | — | `scripts/smoke-test.sh`: criterios de aceptación y los cuatro escenarios del enunciado sobre el stack real |

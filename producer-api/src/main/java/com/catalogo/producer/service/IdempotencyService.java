@@ -13,9 +13,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Optional;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Procesa webhooks de forma idempotente: la misma Idempotency-Key con el mismo contenido
@@ -30,16 +32,32 @@ public class IdempotencyService {
     private final IdempotencyRepository repository;
     private final ItemService itemService;
     private final ObjectMapper mapper;
+    private final TransactionTemplate tx;
 
-    public IdempotencyService(IdempotencyRepository repository, ItemService itemService, ObjectMapper mapper) {
+    public IdempotencyService(IdempotencyRepository repository, ItemService itemService, ObjectMapper mapper,
+                              PlatformTransactionManager txManager) {
         this.repository = repository;
         this.itemService = itemService;
         this.mapper = mapper;
+        this.tx = new TransactionTemplate(txManager);
     }
 
-    @Transactional
+    /**
+     * Si dos peticiones con la misma clave compiten, la que pierde choca con la clave primaria de
+     * idempotency_records. Su transacción se revierte entera y se repite en una nueva, que ya ve el
+     * registro de la ganadora: replay si el contenido coincide, 409 si no. Nunca un 500.
+     * No se usa REQUIRES_NEW anidado: con el pool de una conexión se bloquearía esperándose a sí mismo.
+     */
     public Result process(String key, EventType type, WebhookPayload payload) {
         String hash = hash(type, payload);
+        try {
+            return tx.execute(s -> attempt(key, type, payload, hash));
+        } catch (DataIntegrityViolationException race) {
+            return tx.execute(s -> attempt(key, type, payload, hash));
+        }
+    }
+
+    private Result attempt(String key, EventType type, WebhookPayload payload, String hash) {
 
         Optional<IdempotencyRecord> existing = repository.findById(key);
         if (existing.isPresent()) {
@@ -53,7 +71,7 @@ public class IdempotencyService {
 
         ItemResponse response = itemService.apply(type, payload);
         int status = type == EventType.CREATED ? HttpStatus.CREATED.value() : HttpStatus.OK.value();
-        repository.save(new IdempotencyRecord(key, hash, status, write(response)));
+        repository.saveAndFlush(new IdempotencyRecord(key, hash, status, write(response)));
         return new Result(response, status, false);
     }
 

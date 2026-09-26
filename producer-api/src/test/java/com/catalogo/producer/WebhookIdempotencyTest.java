@@ -28,9 +28,16 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -112,6 +119,40 @@ class WebhookIdempotencyTest {
 
         webhook(key, "CREATED", body(id, "Uno")).andExpect(status().isCreated());
         webhook(key, "CREATED", body(id, "Dos")).andExpect(status().isConflict());
+    }
+
+    @Test
+    void webhooksConcurrentesConLaMismaClaveNoDan500() throws Exception {
+        String id = UUID.randomUUID().toString();
+        String key = key();
+        int n = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<org.springframework.mock.web.MockHttpServletResponse>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < n; i++) {
+                Callable<org.springframework.mock.web.MockHttpServletResponse> call = () -> {
+                    start.await();
+                    return webhook(key, "CREATED", body(id, "Carrera")).andReturn().getResponse();
+                };
+                futures.add(pool.submit(call));
+            }
+            start.countDown();
+            int originales = 0;
+            for (var f : futures) {
+                var r = f.get();
+                assertThat(r.getStatus()).isEqualTo(201);
+                if ("false".equals(r.getHeader("Idempotent-Replayed"))) originales++;
+            }
+            assertThat(originales).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(items.findAll().stream().filter(i -> i.getId().equals(id))).hasSize(1);
+        assertThat(idempotency.findById(key)).isPresent();
+
+        // Misma clave con otro contenido, también tras la carrera: 409, no 500.
+        webhook(key, "CREATED", body(id, "Otro")).andExpect(status().isConflict());
     }
 
     @Test

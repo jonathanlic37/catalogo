@@ -16,4 +16,6 @@
 
 **Total de pruebas automatizadas:** 79 (22 + 26 + 31), más el smoke y el E2E de navegador.
 
+**Actualización (idempotencia concurrente):** Producer **23/23**; `WebhookIdempotencyTest` repetido 20 veces: **20/20** en verde. Total: 80.
+
 Las mismas suites se ejecutan en el CI (`.github/workflows/ci.yml`) en cada PR.
