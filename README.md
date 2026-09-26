@@ -69,14 +69,14 @@ compila las imágenes y tarda unos minutos.
 |---|---|---|
 | Las dos APIs son servicios independientes | Dos proyectos Maven, dos imágenes y dos contenedores. Solo se comunican por HTTP. | `docker-compose.yml` |
 | Cada API usa su propio volumen SQLite | `producer-data` y `consumer-data`. Ninguna API monta el volumen de la otra. | `docker-compose.yml` |
-| Producer es la fuente canónica | Asigna versión y fechas. El Consumer reescribe su proyección con la respuesta del Producer. | §5, `SyncService` |
+| Producer es la fuente canónica | Asigna versión y fechas. El Consumer reescribe su proyección con la respuesta del Producer. | §5, test `crearEnviaWebhook*` |
 | Consumer sincroniza datos creados en Producer | Reconciliación automática cada 60 s y manual (botón «Sincronizar ahora» / `POST /api/reconcile`). | smoke paso 1, test `reconciliacion*` |
 | React obtiene la información desde Consumer | El SPA solo llama a `/api` (nginx → Consumer). Nunca accede a una BD ni al Producer. | `frontend/src/api` |
-| Un cambio desde React llega al Producer por webhook | `PUT /api/items/{id}` → outbox → `POST /webhooks/catalogo` con Bearer e `Idempotency-Key`. | smoke paso 2, test `editar*` |
-| Consumer actualiza su proyección con el resultado confirmado | Aplica versión, fechas y campos canónicos de la respuesta. | smoke paso 2 (v2) |
+| Un cambio desde React llega al Producer por webhook | `PUT /api/items/{id}` → outbox → `POST /webhooks/catalogo` con Bearer e `Idempotency-Key`. | smoke paso 2, test `editarUnItemConfirmado*` |
+| Consumer actualiza su proyección con el resultado confirmado | Aplica versión, fechas y campos canónicos de la respuesta. | smoke paso 2 (v2), test `editarUnItemConfirmado*` |
 | Un webhook duplicado no genera duplicados ni corrupción | Idempotency-Key + hash del payload: el reenvío devuelve la respuesta original sin reaplicar. | smoke paso 3, test `webhookDuplicado*` |
 | El reinicio de Consumer no elimina su proyección | Proyección y outbox persisten en `consumer-data`. Los eventos pendientes se reenvían tras el reinicio. | smoke paso 6 |
-| Los errores de comunicación no se presentan como éxitos | Las escrituras responden **202 PENDING**. Solo pasan a *Sincronizado* con la confirmación del Producer. Los fallos se muestran como *Error de sincronización* con el motivo. | smoke paso 5, UI |
+| Los errores de comunicación no se presentan como éxitos | Las escrituras responden **202 PENDING**. Solo pasan a *Sincronizado* con la confirmación del Producer. Los fallos se muestran como *Error de sincronización* con el motivo. | smoke paso 5, tests `siElProducerFalla*`, `rechazoDelProducerMarcaFailed*`, `SyncBadge.test` |
 | Los endpoints protegidos rechazan peticiones sin Bearer válido | 401 en Consumer (JWT OIDC), Producer y webhook (token de servicio). 403 si la credencial no tiene el privilegio: el token del Consumer no puede escribir directamente en el Producer. | smoke, tests `sinToken*`, `separacionDePrivilegios*` |
 | Se ejecuta desde cero con Docker Compose | `cp .env.example .env && docker compose up --build`, sin pasos manuales. El CI lo hace igual. | `.github/workflows/ci.yml` |
 | Pruebas automatizadas del flujo principal | 79 tests (22 Producer, 26 Consumer, 31 frontend), smoke E2E de API y **E2E de navegador (Playwright)** con login real en Keycloak. | §11 |
