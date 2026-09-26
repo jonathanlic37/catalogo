@@ -81,21 +81,23 @@ compila las imágenes y tarda unos minutos.
 | Se ejecuta desde cero con Docker Compose | `cp .env.example .env && docker compose up --build`, sin pasos manuales. El CI lo hace igual. | `.github/workflows/ci.yml` |
 | Pruebas automatizadas del flujo principal | 79 tests (22 Producer, 26 Consumer, 31 frontend), smoke E2E de API y **E2E de navegador (Playwright)** con login real en Keycloak. | §11 |
 
-Funcionalidades opcionales implementadas, todas en §5 a §8:
+Funcionalidades opcionales del enunciado, todas implementadas:
 
-- Outbox transaccional.
-- Reintentos con backoff exponencial.
-- Control de versiones.
-- Detección y gestión de conflictos (política configurable).
-- Reconciliación automática y manual.
-- Manejo de eventos fuera de orden.
-- Contract tests entre las APIs.
-- Healthchecks diferenciados (liveness/readiness).
-- Métricas de sincronización (Prometheus).
-- Registro de eventos fallidos (API y pantalla *Sincronización*).
-- UI con estados claros de sincronización.
-- Paginación, filtros y búsqueda.
-- Varios tipos de contenido (`PRODUCTO`, `SERVICIO`, `CONTENIDO`).
+| Opcional | Cómo se implementa | Dónde leerlo | Prueba |
+|---|---|---|---|
+| Outbox transaccional | Cambio y evento se guardan en una transacción (`outbox_events`); la confirmación (evento `SENT` + proyección) también es atómica. | §5, D-01 | smoke bloque 6 (reinicio con un cambio pendiente), `crearEnviaWebhook*` |
+| Reintentos con backoff | 10 s × 2ⁿ con tope de 5 min; los fallos transitorios se reintentan sin límite y con la misma `Idempotency-Key`. | §6, D-06 | `siElProducerFalla*`, `conElProducerCaido*`, `OutboxBatchCutoffTest` |
+| Control de versiones | `version` en el Producer y `baseVersion` en cada cambio. | §4, D-04 | `actualizacionIncrementaVersion*`, `laVersionPrevalece*` |
+| Detección y gestión de conflictos | 409 sin sobrescribir; política `MANUAL` por defecto, `PRODUCER_WINS` y `CONSUMER_WINS` configurables. | §6, D-05 | `rechazoDelProducerMarcaFailed*`, `SyncProducerWinsTest`, `SyncConsumerWinsTest`, smoke bloque 4 |
+| Reconciliación manual o automática | Automática cada 60 s y manual («Sincronizar ahora» / `POST /api/reconcile`). | §5, D-09 | `reconciliacion*`, smoke bloque 1 |
+| Manejo de eventos fuera de orden | La versión decide; los eventos sin versión se ordenan por `occurredAt`. | §6 | `descartaEventosFueraDeOrden`, `laVersionPrevalece*` |
+| Contract tests entre las APIs | Fuente única en `contracts/`, verificada desde ambos lados. | `contracts/README.md` | `elPayloadDelWebhookCumple*`, `elWebhookAceptaElContrato*`, `elConsumerEntiende*` |
+| Healthchecks diferenciados | Liveness (proceso) y readiness (proceso + BD); compose usa readiness. | §3 | `healthchecksDiferenciadosSonPublicos` |
+| Métricas de sincronización | `sync_outbox_*` y `sync_reconcile_*` en `/actuator/prometheus`, solo para `admin`. | §7 | `lasMetricasDeSincronizacionSoloParaAdministradores`, smoke |
+| Registro de eventos fallidos | `GET /api/sync/events?status=FAILED` y pantalla *Sincronización*, con motivo e intentos. | §7 | `registroDeEventosFallidosConSuMotivo`, `SyncEvents.test` |
+| Interfaz con estados claros de sincronización | Pills con icono y texto: pendiente, sincronizado y error con su motivo; reintento automático visible. | manual de uso | `SyncBadge.test`, `CatalogoList.test`, E2E de navegador |
+| Paginación, filtros y búsqueda | En servidor: por nombre, estado, tipo y sincronización. | §12, D-15 | `listaPaginadaConBusquedaYResumen`, `filtraPorTipoYPorEstadoDeSincronizacion` |
+| Varios tipos de contenido | Campo `tipo` (`PRODUCTO`, `SERVICIO`, `CONTENIDO`); añadir uno es añadir un valor al enum. | §4 | `filtraPorTipo*`, contrato `item-response.json` |
 
 ### Priorización: núcleo del enunciado y extras
 
@@ -489,7 +491,7 @@ Los tests de backend montan la raíz del repositorio porque los contratos viven 
 
 | Módulo | Tests | Cubren |
 |---|---|---|
-| `producer-api` | 20 (`WebhookIdempotencyTest`) | Webhook duplicado, clave reutilizada con otro contenido (409), versión obsoleta en edición y borrado (409), prioridad de la versión sobre `occurredAt`, eventos fuera de orden, escritura directa, paginación, 401, validación sin stack trace, campos desconocidos rechazados, códigos estándar (400/415), **contrato** (acepta `webhook-created.json` y responde con la forma de `item-response.json`), purga de idempotencia, backup legible y validación de tokens. |
+| `producer-api` | 22 (`WebhookIdempotencyTest`) | Webhook duplicado, clave reutilizada con otro contenido (409), versión obsoleta en edición y borrado (409), prioridad de la versión sobre `occurredAt`, eventos fuera de orden, escritura directa, separación de privilegios entre las credenciales del Consumer y de administración (403), paginación, 401, validación sin stack trace, campos desconocidos rechazados, códigos estándar (400/415), **contrato** (acepta `webhook-created.json` y responde con la forma de `item-response.json`), purga de idempotencia, backup legible y validación de tokens. |
 | `consumer-api` | 26 (`SyncServiceWireMockTest`, `SyncProducerWinsTest`, `SyncConsumerWinsTest`, `OutboxBatchCutoffTest`) con el Producer simulado en WireMock | Alta → webhook (Bearer, Idempotency-Key, X-Event-Type) → `CONFIRMED`; edición con `baseVersion`; reintentos con la misma clave; Producer caído más allá de `SYNC_MAX_RETRIES` sigue pendiente y se confirma al volver; políticas `PRODUCER_WINS` y `CONSUMER_WINS` (rebase y tope de conflictos); rechazo → `FAILED` con su motivo (`CONFLICT`, `GONE`, `REJECTED`); borrado (y 404 idempotente); edición bloqueada si hay cambio pendiente; paginación, búsqueda y filtros (estado, tipo, sincronización); reconciliación (siembra, borrado seguro y manual); registro de eventos fallidos; métricas solo para admin; healthchecks; **contrato** en ambos sentidos; purga del outbox; corte del lote con el Producer caído; seguridad y errores estándar. |
 | `frontend` | 31 (Vitest + Testing Library) | Login OIDC (sin sesión no hay llamadas; tras `/callback` la primera petición ya lleva el Bearer), lista con estados de sincronización, paginación, búsqueda, filtros y atajos, reintentar solo cuando tiene sentido y descartar, aviso de reintento automático con el Producer caído, componentes del sistema de diseño, confirmación de borrado, reconciliación manual, formulario (validación local y del servidor, sin pisar lo que se escribe) y registro de eventos. |
 | E2E de API | `scripts/smoke-test.sh` | Stack real con los criterios de aceptación y escenarios de §6, incluida la separación de privilegios del Producer. |
