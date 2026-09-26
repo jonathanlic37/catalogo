@@ -124,8 +124,7 @@ trabajo se ordenó en tres niveles, y cada nivel se cerró (con tests) antes de 
 | **Sistema de diseño propio** | Estados de sincronización claros y usables en móvil, tablet y POS táctil. | CSS propio, sin dependencias | — |
 | **Endurecimiento de contenedores** | Mínimo privilegio (solo lectura, sin capabilities, límites de memoria). | Ninguno en ejecución | Quitar las claves `x-java-service` de `docker-compose.yml`. |
 
-**Se descartó por alcance** (ver §14): broker de mensajes, varios Consumers, migraciones
-versionadas, TLS, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
+**Se descartó por alcance** (ver §14): broker de mensajes, varios Consumers, TLS, auditoría por usuario, fusión automática de conflictos y dashboards. Todo ello
 aparece como evolución en §15.
 
 **Alcance sugerido frente a alcance entregado.** El enunciado sugiere un máximo de 24 horas y no
@@ -553,7 +552,7 @@ con cada una. Las que tienen más contexto enlazan a su sección.
 
 | # | Decisión | Alternativa descartada | Por qué / trade-off |
 |---|---|---|---|
-| D-14 | **SQLite + `ddl-auto=update`** | Migraciones versionadas (Flyway/Liquibase) | Lo pide el enunciado y reduce piezas. Migrar a esquemas versionados es el primer paso hacia producción. |
+| D-14 | **SQLite + esquema versionado con Flyway** (`db/migration/V1__init.sql`) y `ddl-auto=validate` | `ddl-auto=update` (Hibernate altera el esquema en cada arranque) | El esquema es explícito, revisable y reproducible; Hibernate solo comprueba que coincide. `V1` es el DDL volcado de Hibernate, con `IF NOT EXISTS` y `baseline-version: 0` para que las BD creadas antes con `update` se actualicen sin perder datos. A cambio, cada cambio del modelo exige una migración nueva. |
 | D-15 | **Paginación, búsqueda y filtros en el servidor** | Traer todo el catálogo y filtrar en el navegador | Coste constante por pantalla: con 1.500 ítems, de 178 ms / 595 KB a 32 ms / 1,1 KB ([auditoría](docs/AUDITORIA.md)). A cambio, una petición por cambio de filtro (amortiguada con 300 ms de retardo). |
 | D-16 | **nginx como proxy del SPA** | CORS directo del navegador al Consumer | Mismo origen, CSP estricta, límite de peticiones y de tamaño en un solo punto. |
 | D-17 | **CSS propio con design tokens, sin librería de componentes** | MUI, Tailwind, shadcn… | Control total del sistema visual, bundle ligero y sin dependencias de UI. A cambio, los componentes se mantienen a mano. |
@@ -596,7 +595,6 @@ indicada.
 - **Tokens estáticos** entre servicios (servicio y administración, ya separados), sin rotación.
 - **No hay push** de cambios del Producer al Consumer: se usa reconciliación, O(N) cada minuto.
 - La **búsqueda** usa `lower()` de SQLite, que solo distingue mayúsculas y minúsculas ASCII.
-- **`ddl-auto=update`** en lugar de migraciones versionadas.
 - Con `SYNC_CONFLICT_POLICY=MANUAL` el conflicto lo resuelve el usuario. No hay fusión de campos.
 - **No se implementó:** gestión de usuarios propia (se delega en el IdP); auditoría de quién hizo
   cada cambio en el Producer; atributos específicos por tipo de contenido; borrado lógico; fusión
@@ -610,7 +608,7 @@ indicada.
 2. **Varios consumidores:** el Producer publicaría eventos de dominio (outbox propio → broker como
    Kafka o RabbitMQ). Cada Consumer los aplicaría por versión. La reconciliación quedaría como red
    de seguridad incremental (`?updatedSince=`).
-3. **Datos:** PostgreSQL con migraciones Flyway, borrado lógico y un historial de versiones
+3. **Datos:** PostgreSQL (las migraciones Flyway ya existen; habría que adaptar su SQL al dialecto), borrado lógico y un historial de versiones
    consultable.
 4. **Dominio:** atributos por tipo (`attributes` JSON validado por esquema según `tipo`) y
    auditoría con el `sub` del JWT del autor en el evento.

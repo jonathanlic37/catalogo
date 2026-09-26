@@ -18,4 +18,6 @@
 
 **Actualización (idempotencia concurrente):** Producer **23/23**; `WebhookIdempotencyTest` repetido 20 veces: **20/20** en verde. Total: 80.
 
+**Actualización (Flyway):** Producer 23/23 y Consumer 26/26 con `ddl-auto=validate`. Arranque sobre los volúmenes existentes (baseline 0 → V1) y desde cero (`docker compose down -v`): 4/4 healthy y **SMOKE OK** en ambos casos.
+
 Las mismas suites se ejecutan en el CI (`.github/workflows/ci.yml`) en cada PR.

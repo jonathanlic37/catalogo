@@ -25,7 +25,7 @@ Medido con **1 500 ítems** en el Producer y la réplica (sembrados vía webhook
 | L1 | Alta a escala | La lista devolvía **todo** el catálogo: coste O(N) por carga de pantalla y por polling. | `GET /api/items`: mediana **178 ms**, **595 KB** | Página de 25: mediana **32 ms**, **1,1 KB** transferidos (8,9 KB sin comprimir). Máx. 100/página: 45 ms. | Paginación en servidor (`page`, `size` ≤ 100), búsqueda y filtro en base de datos (comodines `LIKE` escapados), `GET /api/items/summary` para los contadores, índices, gzip en las APIs y nginx; el frontend pasa a paginación en servidor con búsqueda con retardo (300 ms). |
 | L2 | Media | La reconciliación descargaba todo el catálogo del Producer cada minuto en una única respuesta (231 ms / 595 KB, y memoria proporcional a N). | 1 respuesta | Páginas de 500, procesadas una a una | `ReconcileService` recorre por páginas con orden estable (`fechaCreacion, id`); borrado solo con verificación puntual. Verificado con 4 páginas (1 522 ítems). |
 | L3 | Media | Con el Producer caído, el ciclo de reintentos esperaba un timeout **por ítem pendiente** en el único hilo del planificador, que además compartía con la reconciliación. | Bloqueo O(pendientes × timeout) | Corte en el primer fallo de red/5xx + pool de 2 hilos | `retryPending` aplaza el resto del lote; `spring.task.scheduling.pool.size=2`. Cubierto por `OutboxBatchCutoffTest` (`cortaElLoteAlPrimerFalloDelProducer`). |
-| L4 | Baja | Sin índices en la consulta de reintentos (cada 10 s) ni en los órdenes por fecha. | Escaneo completo | Índices `(syncStatus, nextRetryAt)`, `fechaActualizacion`, `(fechaCreacion, id)`, `createdAt` | `@Index` en las entidades (creados con `ddl-auto=update` sobre la BD existente sin errores). |
+| L4 | Baja | Sin índices en la consulta de reintentos (cada 10 s) ni en los órdenes por fecha. | Escaneo completo | Índices `(syncStatus, nextRetryAt)`, `fechaActualizacion`, `(fechaCreacion, id)`, `createdAt` | `@Index` en las entidades (hoy los crea la migración Flyway `V1__init.sql`). |
 | — | Info | Camino de escritura sin degradación con 1 500 ítems. | POST 18 ms · hasta `CONFIRMED` 90 ms | POST 24 ms · hasta `CONFIRMED` 104 ms | Sin cambios necesarios. |
 
 Pruebas de concurrencia (stack real): **100 altas simultáneas** (50 hilos) → 100 × `202`, los 100 `CONFIRMED` en
@@ -75,7 +75,7 @@ Ejecución: README §11.
 3. **SQLite de un solo escritor**: adecuado para decenas de miles de ítems; el backup retiene brevemente la única conexión.
 4. **Reconciliación completa cada minuto**: paginada y acotada en memoria, pero O(N) en red; con cientos de miles de ítems habría que hacerla incremental.
 5. La búsqueda por nombre solo ignora mayúsculas/minúsculas ASCII (`lower()` de SQLite).
-6. `ddl-auto=update` en lugar de migraciones versionadas.
+6. ~~`ddl-auto=update` en lugar de migraciones versionadas.~~ Resuelto: Flyway `V1__init.sql` (DDL volcado de Hibernate) + `ddl-auto=validate`; verificado desde cero y sobre volúmenes existentes (baseline 0).
 7. Sin verificar de extremo a extremo: la restauración de backups (D1).
 
 ## 7. Verificación contra el enunciado de la prueba técnica

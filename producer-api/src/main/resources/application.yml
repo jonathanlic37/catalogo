@@ -25,10 +25,15 @@ spring:
     driver-class-name: org.sqlite.JDBC
     hikari:
       maximum-pool-size: 1
+  flyway:
+    # Las BD creadas antes con ddl-auto=update se marcan en la versión 0 y V1 (IF NOT EXISTS) no las toca.
+    baseline-on-migrate: true
+    baseline-version: 0
   jpa:
     database-platform: org.hibernate.community.dialect.SQLiteDialect
     hibernate:
-      ddl-auto: update
+      # El esquema lo crea Flyway (db/migration/V1__init.sql); Hibernate solo comprueba que coincide.
+      ddl-auto: validate
     open-in-view: false
   jackson:
     default-property-inclusion: non_null

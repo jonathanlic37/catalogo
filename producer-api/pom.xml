@@ -54,6 +54,11 @@
       <groupId>org.hibernate.orm</groupId>
       <artifactId>hibernate-community-dialects</artifactId>
     </dependency>
+    <!-- Esquema versionado (db/migration); Hibernate solo valida. -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
