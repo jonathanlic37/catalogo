@@ -189,6 +189,12 @@ Producer y de Keycloak.
 **Volúmenes.** `producer-data` guarda la SSoT, `producer-backups` sus copias y `consumer-data` la
 proyección con el outbox.
 
+**Healthchecks diferenciados.** Cada API expone `/actuator/health/liveness` (el proceso responde: si
+falla, reiniciarlo) y `/actuator/health/readiness` (además la base de datos está disponible: si falla,
+no enviarle tráfico); compose usa *readiness* para ordenar el arranque. La readiness del Consumer
+**no depende del Producer** a propósito: con el Producer caído sigue sirviendo su proyección y
+encolando cambios, en lugar de fallar en cascada. Keycloak y el frontend tienen su propio healthcheck.
+
 ### Varios canales y aplicaciones
 
 El contexto del enunciado habla de un catálogo "utilizado por diferentes canales y aplicaciones",
