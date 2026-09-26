@@ -1,0 +1,336 @@
+# docs/openapi/consumer-api.yaml — especificación OpenAPI 3 de la Consumer API (la que usa el frontend).
+# Escrita a partir del código (consumer-api/src/main/java/.../web). Visualízala con docs/api.html.
+openapi: 3.0.3
+info:
+  title: Consumer API — Catálogo (proyección local)
+  version: 1.0.0
+  license:
+    name: Uso interno — prueba técnica
+  description: |
+    API única del frontend. Sirve las lecturas desde su **proyección local** (SQLite propia) y envía
+    cada cambio al Producer por un webhook idempotente mediante un **outbox transaccional**.
+
+    **Un cambio no es definitivo hasta que el Producer lo acepta:** las escrituras responden
+    `202 Accepted` con `syncStatus=PENDING`; el ítem pasa a `CONFIRMED` con la respuesta canónica del
+    Producer. Mientras un ítem tiene un cambio pendiente o fallido, no se puede volver a editar (409).
+
+    **Autenticación:** Bearer JWT emitido por Keycloak (OIDC). El SPA lo obtiene con Authorization
+    Code + PKCE; para curl/Postman, con el cliente de desarrollo `catalogo-cli` (ver docs/curl.md).
+    Rol de realm `user` o `admin`; las métricas exigen `admin`.
+
+    Los errores siguen RFC 7807 (`application/problem+json`) y nunca incluyen trazas.
+servers:
+  - url: http://localhost:8081
+    description: Directo (solo 127.0.0.1)
+  - url: http://localhost:8088
+    description: A través del proxy nginx del frontend (mismo origen que la UI)
+tags:
+  - name: Ítems
+    description: Consulta y modificación del catálogo (proyección local).
+  - name: Sincronización
+    description: Reconciliación con el Producer y registro de eventos.
+  - name: Operación
+    description: Healthchecks y métricas.
+paths:
+  /api/items:
+    get:
+      operationId: listarItems
+      tags: [Ítems]
+      summary: Lista paginada con búsqueda y filtros
+      description: Resuelta en base de datos con parámetros. Los comodines de búsqueda se escapan.
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, description: 'Se acota a 1..100.', schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: q, in: query, description: 'Búsqueda por nombre (sin distinguir mayúsculas; máx. 100 caracteres).', schema: { type: string, maxLength: 100 } }
+        - { name: estado, in: query, schema: { $ref: '#/components/schemas/Estado' } }
+        - { name: tipo, in: query, schema: { $ref: '#/components/schemas/TipoContenido' } }
+        - { name: sync, in: query, description: Estado de sincronización., schema: { $ref: '#/components/schemas/SyncStatus' } }
+      responses:
+        '200':
+          description: Página de ítems (más recientes primero).
+          content: { application/json: { schema: { $ref: '#/components/schemas/PageItemView' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: crearItem
+      tags: [Ítems]
+      summary: Crear un ítem (queda pendiente de confirmación)
+      description: Guarda el ítem y su evento en el outbox en una transacción y responde 202. El envío al Producer es inmediato y asíncrono.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ItemRequest' } } }
+      responses:
+        '202':
+          description: Aceptado localmente; `syncStatus=PENDING`, `pendingOperation=CREATED`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+  /api/items/summary:
+    get:
+      operationId: resumen
+      tags: [Ítems]
+      summary: Contadores globales (independientes de la página)
+      responses:
+        '200':
+          description: Totales.
+          content: { application/json: { schema: { $ref: '#/components/schemas/SummaryView' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/items/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: obtenerItem
+      tags: [Ítems]
+      summary: Obtener un ítem de la proyección
+      responses:
+        '200':
+          description: Ítem con su estado de sincronización.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: editarItem
+      tags: [Ítems]
+      summary: Editar un ítem (queda pendiente de confirmación)
+      description: Solo sobre ítems `CONFIRMED`. El evento lleva `baseVersion` = versión actual para detectar conflictos en el Producer.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ItemRequest' } } }
+      responses:
+        '202':
+          description: Aceptado localmente; `syncStatus=PENDING`, `pendingOperation=UPDATED`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/NotEditable' }
+    delete:
+      operationId: eliminarItem
+      tags: [Ítems]
+      summary: Eliminar un ítem (queda pendiente de confirmación)
+      description: Solo sobre ítems `CONFIRMED`. La fila desaparece de la proyección cuando el Producer confirma el borrado.
+      responses:
+        '202':
+          description: Aceptado localmente; `pendingOperation=DELETED`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/NotEditable' }
+  /api/items/{id}/retry:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: reintentarCambio
+      tags: [Sincronización]
+      summary: Reenviar un cambio fallido (misma Idempotency-Key)
+      description: Útil ante `failureReason=REJECTED` tras corregir la causa. Ante `CONFLICT` o `GONE` volvería a fallar; la UI no lo ofrece.
+      responses:
+        '202':
+          description: El cambio vuelve a `PENDING`.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El ítem no está `FAILED` o no tiene un evento fallido.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+  /api/items/{id}/resync:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: descartarCambio
+      tags: [Sincronización]
+      summary: Descartar un cambio fallido y adoptar la versión del Producer
+      responses:
+        '200':
+          description: Proyección restaurada con el estado canónico (`CONFIRMED`).
+          content: { application/json: { schema: { $ref: '#/components/schemas/ItemView' } } }
+        '204': { description: El ítem ya no existe en el Producer; se retiró de la proyección. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: El ítem no está `FAILED`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '502': { $ref: '#/components/responses/ProducerUnavailable' }
+  /api/reconcile:
+    post:
+      operationId: reconciliar
+      tags: [Sincronización]
+      summary: Forzar una reconciliación con el Producer («Sincronizar ahora»)
+      description: Siembra ítems nuevos, actualiza los CONFIRMED con versión remota mayor y retira los borrados en el Producer. Nunca toca ítems pendientes o fallidos. También se ejecuta sola cada `SYNC_RECONCILE_INTERVAL_MS`.
+      responses:
+        '200':
+          description: Resumen de cambios aplicados a la proyección.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ReconcileResult' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '502': { $ref: '#/components/responses/ProducerUnavailable' }
+  /api/sync/events:
+    get:
+      operationId: registroDeEventos
+      tags: [Sincronización]
+      summary: Registro de eventos de sincronización (outbox)
+      description: Del más reciente al más antiguo. Con `status=FAILED` es el registro de eventos fallidos. No expone el payload.
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/OutboxStatus' } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200':
+          description: Página de eventos.
+          content: { application/json: { schema: { $ref: '#/components/schemas/PageOutboxEventView' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /actuator/health/liveness:
+    get:
+      operationId: liveness
+      tags: [Operación]
+      summary: Liveness (el proceso responde). Público.
+      security: []
+      responses: { '200': { $ref: '#/components/responses/Health' } }
+  /actuator/health/readiness:
+    get:
+      operationId: readiness
+      tags: [Operación]
+      summary: Readiness (proceso + base de datos; no depende del Producer). Público.
+      security: []
+      responses:
+        '200': { $ref: '#/components/responses/Health' }
+        '503': { description: No listo. }
+  /actuator/prometheus:
+    get:
+      operationId: metricas
+      tags: [Operación]
+      summary: Métricas de sincronización (sync_outbox_*, sync_reconcile_*). Solo rol admin.
+      responses:
+        '200': { description: Métricas., content: { text/plain: { schema: { type: string } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: El usuario no tiene el rol admin.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+components:
+  securitySchemes:
+    jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token de Keycloak (realm `catalogo`), con rol de realm `user` o `admin`.
+  schemas:
+    Estado: { type: string, enum: [ACTIVO, INACTIVO] }
+    TipoContenido: { type: string, enum: [PRODUCTO, SERVICIO, CONTENIDO] }
+    SyncStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, FAILED]
+      description: 'PENDING: aún no confirmado por el Producer · CONFIRMED: coincide con la fuente de verdad · FAILED: el Producer lo rechazó.'
+    PendingOperation: { type: string, enum: [CREATED, UPDATED, DELETED] }
+    FailureReason:
+      type: string
+      enum: [CONFLICT, GONE, REJECTED]
+      description: 'CONFLICT: versión obsoleta (409) · GONE: el ítem ya no existe (404) · REJECTED: otro rechazo 4xx.'
+    OutboxStatus: { type: string, enum: [PENDING, SENT, FAILED] }
+    ItemRequest:
+      type: object
+      additionalProperties: false
+      description: Campos que decide el usuario. Un campo desconocido (p. ej. `syncStatus`) → 400.
+      required: [nombre, estado]
+      properties:
+        nombre: { type: string, minLength: 1, maxLength: 120, example: Café molido }
+        descripcion: { type: string, maxLength: 1000, nullable: true, example: 500 g }
+        estado: { $ref: '#/components/schemas/Estado' }
+        tipo: { allOf: [{ $ref: '#/components/schemas/TipoContenido' }], description: 'Opcional; por defecto PRODUCTO.' }
+    ItemView:
+      type: object
+      required: [id, nombre, estado, tipo, fechaCreacion, fechaActualizacion, version, syncStatus, syncAttempts]
+      properties:
+        id: { type: string }
+        nombre: { type: string }
+        descripcion: { type: string }
+        estado: { $ref: '#/components/schemas/Estado' }
+        tipo: { $ref: '#/components/schemas/TipoContenido' }
+        fechaCreacion: { type: string, format: date-time }
+        fechaActualizacion: { type: string, format: date-time }
+        version: { type: integer, format: int64, description: Última versión confirmada por el Producer (0 si nunca se confirmó). }
+        syncStatus: { $ref: '#/components/schemas/SyncStatus' }
+        pendingOperation: { allOf: [{ $ref: '#/components/schemas/PendingOperation' }], description: Solo mientras hay un cambio sin confirmar. }
+        syncError: { type: string, description: 'Motivo del último intento fallido (también mientras se reintenta).' }
+        syncAttempts: { type: integer, description: Intentos del último envío. }
+        failureReason: { allOf: [{ $ref: '#/components/schemas/FailureReason' }], description: Solo con `syncStatus=FAILED`. }
+    SummaryView:
+      type: object
+      properties:
+        total: { type: integer, format: int64 }
+        activos: { type: integer, format: int64 }
+        pendientes: { type: integer, format: int64 }
+        fallidos: { type: integer, format: int64 }
+    ReconcileResult:
+      type: object
+      properties:
+        created: { type: integer }
+        updated: { type: integer }
+        deleted: { type: integer }
+    OutboxEventView:
+      type: object
+      properties:
+        id: { type: string, description: 'Idempotency-Key del evento.' }
+        itemId: { type: string }
+        eventType: { $ref: '#/components/schemas/PendingOperation' }
+        status: { $ref: '#/components/schemas/OutboxStatus' }
+        attempts: { type: integer }
+        lastError: { type: string }
+        occurredAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        nextAttemptAt: { type: string, format: date-time }
+        sentAt: { type: string, format: date-time }
+    PageItemView:
+      type: object
+      required: [content, page, size, totalElements, totalPages, last]
+      properties:
+        content: { type: array, items: { $ref: '#/components/schemas/ItemView' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        last: { type: boolean }
+    PageOutboxEventView:
+      type: object
+      required: [content, page, size, totalElements, totalPages, last]
+      properties:
+        content: { type: array, items: { $ref: '#/components/schemas/OutboxEventView' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        last: { type: boolean }
+    Problem:
+      type: object
+      description: Error RFC 7807, sin trazas.
+      properties:
+        type: { type: string, example: about:blank }
+        title: { type: string, example: Conflict }
+        status: { type: integer, example: 409 }
+        detail: { type: string, example: 'El ítem tiene un cambio pendiente o fallido; espere la confirmación, reintente o resincronice' }
+        instance: { type: string }
+        errors: { type: object, additionalProperties: { type: string }, description: Solo en validación. }
+  responses:
+    BadRequest:
+      description: Datos inválidos, parámetro no válido o campo desconocido.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Unauthorized:
+      description: Sin Bearer o JWT inválido/caducado.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotFound:
+      description: Ítem no encontrado en la proyección.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    NotEditable:
+      description: El ítem tiene un cambio pendiente o fallido.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    UnsupportedMediaType:
+      description: El cuerpo debe ser application/json.
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    ProducerUnavailable:
+      description: El Producer no responde (nunca se presenta como éxito).
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+    Health:
+      description: Estado del servicio.
+      content: { application/json: { schema: { type: object, properties: { status: { type: string, example: UP } } } } }
+security:
+  - jwt: []
