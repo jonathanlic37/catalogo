@@ -28,9 +28,16 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -51,6 +58,9 @@ class WebhookIdempotencyTest {
     private static final String TOKEN = "test-token-0123456789-abcdefghijklmnopqrstuvwxyz";
     /** Credencial de administración (ADMIN): escritura directa + lectura + métricas. */
     private static final String ADMIN = "admin-token-0123456789-abcdefghijklmnopqrstuvwxyz";
+    /** Tokens anteriores aceptados durante una rotación (CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS, PRODUCER_ADMIN_TOKEN_PREVIOUS). */
+    private static final String TOKEN_PREVIO = "old-test-token-0123456789-abcdefghijklmnopqrstuvwxyz";
+    private static final String ADMIN_PREVIO = "old-admin-token-0123456789-abcdefghijklmnopqrstuvwxyz";
 
     @TempDir
     static Path tmp;
@@ -60,6 +70,8 @@ class WebhookIdempotencyTest {
         r.add("spring.datasource.url", () -> "jdbc:sqlite:" + tmp.resolve("producer-test.db"));
         r.add("app.security.consumer-token", () -> TOKEN);
         r.add("app.security.admin-token", () -> ADMIN);
+        r.add("app.security.consumer-token-previous", () -> TOKEN_PREVIO);
+        r.add("app.security.admin-token-previous", () -> ADMIN_PREVIO);
         r.add("app.cors.allowed-origins", () -> "http://localhost:8088");
         r.add("app.backup.dir", () -> tmp.resolve("backups").toString());
         r.add("app.backup.keep", () -> "2");
@@ -112,6 +124,40 @@ class WebhookIdempotencyTest {
 
         webhook(key, "CREATED", body(id, "Uno")).andExpect(status().isCreated());
         webhook(key, "CREATED", body(id, "Dos")).andExpect(status().isConflict());
+    }
+
+    @Test
+    void webhooksConcurrentesConLaMismaClaveNoDan500() throws Exception {
+        String id = UUID.randomUUID().toString();
+        String key = key();
+        int n = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(n);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<org.springframework.mock.web.MockHttpServletResponse>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < n; i++) {
+                Callable<org.springframework.mock.web.MockHttpServletResponse> call = () -> {
+                    start.await();
+                    return webhook(key, "CREATED", body(id, "Carrera")).andReturn().getResponse();
+                };
+                futures.add(pool.submit(call));
+            }
+            start.countDown();
+            int originales = 0;
+            for (var f : futures) {
+                var r = f.get();
+                assertThat(r.getStatus()).isEqualTo(201);
+                if ("false".equals(r.getHeader("Idempotent-Replayed"))) originales++;
+            }
+            assertThat(originales).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(items.findAll().stream().filter(i -> i.getId().equals(id))).hasSize(1);
+        assertThat(idempotency.findById(key)).isPresent();
+
+        // Misma clave con otro contenido, también tras la carrera: 409, no 500.
+        webhook(key, "CREATED", body(id, "Otro")).andExpect(status().isConflict());
     }
 
     @Test
@@ -377,6 +423,37 @@ class WebhookIdempotencyTest {
         assertThatThrownBy(() -> TokenValidator.requireDistinct("A", TOKEN, "B", TOKEN))
                 .isInstanceOf(IllegalStateException.class);
         TokenValidator.requireDistinct("A", TOKEN, "B", ADMIN);
+        // En rotación, ningún token (actual o anterior) puede repetirse.
+        assertThatThrownBy(() -> TokenValidator.requireAllDistinct(java.util.List.of(TOKEN, ADMIN, TOKEN)))
+                .isInstanceOf(IllegalStateException.class);
+        TokenValidator.requireAllDistinct(java.util.List.of(TOKEN, ADMIN, TOKEN_PREVIO, ADMIN_PREVIO));
+    }
+
+    @Test
+    void rotacionAceptaElTokenAnteriorConSuMismoRolYNadaMas() throws Exception {
+        // El token anterior del Consumer sigue sirviendo para el webhook y la lectura...
+        mvc.perform(post("/webhooks/catalogo").header("Authorization", "Bearer " + TOKEN_PREVIO)
+                        .header("Idempotency-Key", key()).header("X-Event-Type", "CREATED")
+                        .contentType(MediaType.APPLICATION_JSON).content(body(UUID.randomUUID().toString(), "Rotacion")))
+                .andExpect(status().isCreated());
+        mvc.perform(get("/api/items").header("Authorization", "Bearer " + TOKEN_PREVIO)).andExpect(status().isOk());
+        // ...pero no hereda privilegios de administración.
+        mvc.perform(post("/api/items").header("Authorization", "Bearer " + TOKEN_PREVIO)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"x\",\"estado\":\"ACTIVO\"}"))
+                .andExpect(status().isForbidden());
+        // El token anterior de administración conserva su rol (escritura directa) y no puede usar el webhook.
+        mvc.perform(post("/api/items").header("Authorization", "Bearer " + ADMIN_PREVIO)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Rotado\",\"estado\":\"ACTIVO\"}"))
+                .andExpect(status().isCreated());
+        mvc.perform(post("/webhooks/catalogo").header("Authorization", "Bearer " + ADMIN_PREVIO)
+                        .header("Idempotency-Key", key()).header("X-Event-Type", "CREATED")
+                        .contentType(MediaType.APPLICATION_JSON).content(body(UUID.randomUUID().toString(), "X")))
+                .andExpect(status().isForbidden());
+        // Un token que no es ni actual ni anterior sigue dando 401.
+        mvc.perform(get("/api/items").header("Authorization", "Bearer otro-token-0123456789-abcdefghijklmnopqrstuvwxyz"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

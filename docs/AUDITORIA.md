@@ -24,8 +24,8 @@ Medido con **1 500 ítems** en el Producer y la réplica (sembrados vía webhook
 |---|---|---|---|---|---|
 | L1 | Alta a escala | La lista devolvía **todo** el catálogo: coste O(N) por carga de pantalla y por polling. | `GET /api/items`: mediana **178 ms**, **595 KB** | Página de 25: mediana **32 ms**, **1,1 KB** transferidos (8,9 KB sin comprimir). Máx. 100/página: 45 ms. | Paginación en servidor (`page`, `size` ≤ 100), búsqueda y filtro en base de datos (comodines `LIKE` escapados), `GET /api/items/summary` para los contadores, índices, gzip en las APIs y nginx; el frontend pasa a paginación en servidor con búsqueda con retardo (300 ms). |
 | L2 | Media | La reconciliación descargaba todo el catálogo del Producer cada minuto en una única respuesta (231 ms / 595 KB, y memoria proporcional a N). | 1 respuesta | Páginas de 500, procesadas una a una | `ReconcileService` recorre por páginas con orden estable (`fechaCreacion, id`); borrado solo con verificación puntual. Verificado con 4 páginas (1 522 ítems). |
-| L3 | Media | Con el Producer caído, el ciclo de reintentos esperaba un timeout **por ítem pendiente** en el único hilo del planificador, que además compartía con la reconciliación. | Bloqueo O(pendientes × timeout) | Corte en el primer fallo de red/5xx + pool de 2 hilos | `retryPending` aplaza el resto del lote; `spring.task.scheduling.pool.size=2`. *Cubierto por revisión de código; no tiene una prueba dedicada.* |
-| L4 | Baja | Sin índices en la consulta de reintentos (cada 10 s) ni en los órdenes por fecha. | Escaneo completo | Índices `(syncStatus, nextRetryAt)`, `fechaActualizacion`, `(fechaCreacion, id)`, `createdAt` | `@Index` en las entidades (creados con `ddl-auto=update` sobre la BD existente sin errores). |
+| L3 | Media | Con el Producer caído, el ciclo de reintentos esperaba un timeout **por ítem pendiente** en el único hilo del planificador, que además compartía con la reconciliación. | Bloqueo O(pendientes × timeout) | Corte en el primer fallo de red/5xx + pool de 2 hilos | `retryPending` aplaza el resto del lote; `spring.task.scheduling.pool.size=2`. Cubierto por `OutboxBatchCutoffTest` (`cortaElLoteAlPrimerFalloDelProducer`). |
+| L4 | Baja | Sin índices en la consulta de reintentos (cada 10 s) ni en los órdenes por fecha. | Escaneo completo | Índices `(syncStatus, nextRetryAt)`, `fechaActualizacion`, `(fechaCreacion, id)`, `createdAt` | `@Index` en las entidades (hoy los crea la migración Flyway `V1__init.sql`). |
 | — | Info | Camino de escritura sin degradación con 1 500 ítems. | POST 18 ms · hasta `CONFIRMED` 90 ms | POST 24 ms · hasta `CONFIRMED` 104 ms | Sin cambios necesarios. |
 
 Pruebas de concurrencia (stack real): **100 altas simultáneas** (50 hilos) → 100 × `202`, los 100 `CONFIRMED` en
@@ -42,7 +42,7 @@ Pruebas de concurrencia (stack real): **100 altas simultáneas** (50 hilos) → 
 | S4 | Media | Contenedores con privilegios por defecto: sistema de ficheros escribible, todas las capabilities, sin límites, logs sin rotar. | Java: `read_only`, `cap_drop: ALL`, `no-new-privileges`, 512 MB, 200 procesos; nginx: sin capabilities, 128 MB; logs `json-file` 10 MB × 3. | Verificado con `docker inspect`; los tres servicios `healthy`. |
 | S5 | Baja | `.env` (con secretos) con permisos 664. | `chmod 600` y documentado. | Verificado. |
 | S6 | Info | Sin límite de peticiones por cliente. | Después se añadió `limit_req` por IP en nginx (`RATE_LIMIT_RATE`/`RATE_LIMIT_BURST`, responde 429). | **Resuelto** en el proxy; las APIs no tienen límite propio. |
-| S7 | Info | Sin TLS entre contenedores. | La red `backend` es interna (sin salida a Internet). | **Aceptado**, documentado. |
+| S7 | Info | Sin TLS entre contenedores. | La red `backend` es interna (sin salida a Internet). La UI admite TLS con `docker-compose.tls.yml`. | **Aceptado**, documentado. |
 
 Comprobado sin hallazgo (en su momento): sin token → 401 en ambas APIs, el bundle no contiene tokens y
 las validaciones no exponen trazas.
@@ -60,7 +60,7 @@ las validaciones no exponen trazas.
 
 | Módulo | Primera auditoría | Tras la verificación contra el enunciado (§7) |
 |---|---|---|
-| `producer-api` | 5 → 11 | **22** |
+| `producer-api` | 5 → 11 | **24** (incluye `webhooksConcurrentesConLaMismaClaveNoDan500` y `rotacionAceptaElTokenAnteriorConSuMismoRolYNadaMas`) |
 | `consumer-api` | 4 → 12 | **26** (incluye `OutboxBatchCutoffTest`, que cubre L3, y las pruebas de las tres políticas de conflicto) |
 | `frontend` | 0 → 14 | **31** |
 | E2E de API | — | `scripts/smoke-test.sh`: criterios de aceptación y los cuatro escenarios del enunciado sobre el stack real |
@@ -70,12 +70,12 @@ Ejecución: README §11.
 
 ## 6. Riesgos residuales (no mitigados)
 
-1. **Tokens estáticos** entre servicios (servicio y administración, ya separados), sin rotación y sin TLS en la red interna.
+1. **Tokens estáticos** entre servicios (servicio y administración, ya separados), sin TLS en la red interna. Mitigado en parte: rotación sin corte con `*_PREVIOUS` y TLS opcional en la UI (`docker-compose.tls.yml`); no caducan solos.
 2. **Keycloak en modo desarrollo** (H2 embebido y usuarios de demostración; sus contraseñas vienen del entorno).
 3. **SQLite de un solo escritor**: adecuado para decenas de miles de ítems; el backup retiene brevemente la única conexión.
 4. **Reconciliación completa cada minuto**: paginada y acotada en memoria, pero O(N) en red; con cientos de miles de ítems habría que hacerla incremental.
 5. La búsqueda por nombre solo ignora mayúsculas/minúsculas ASCII (`lower()` de SQLite).
-6. `ddl-auto=update` en lugar de migraciones versionadas.
+6. ~~`ddl-auto=update` en lugar de migraciones versionadas.~~ Resuelto: Flyway `V1__init.sql` (DDL volcado de Hibernate) + `ddl-auto=validate`; verificado desde cero y sobre volúmenes existentes (baseline 0).
 7. Sin verificar de extremo a extremo: la restauración de backups (D1).
 
 ## 7. Verificación contra el enunciado de la prueba técnica

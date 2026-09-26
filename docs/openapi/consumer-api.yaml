@@ -24,6 +24,8 @@ servers:
     description: Directo (solo 127.0.0.1)
   - url: http://localhost:8088
     description: A través del proxy nginx del frontend (mismo origen que la UI)
+  - url: https://localhost:8443
+    description: Proxy nginx con TLS (docker-compose.tls.yml; certificado autofirmado)
 tags:
   - name: Ítems
     description: Consulta y modificación del catálogo (proyección local).

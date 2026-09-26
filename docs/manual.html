@@ -202,6 +202,7 @@ docker compose up --build</code></pre>
         <thead><tr><th>Qué</th><th>Dirección</th></tr></thead>
         <tbody>
           <tr><td>La aplicación</td><td><a href="http://localhost:8088">http://localhost:8088</a></td></tr>
+          <tr><td>La aplicación con HTTPS (opcional, ver «Acceso cifrado»)</td><td><a href="https://localhost:8443">https://localhost:8443</a></td></tr>
           <tr><td>Consola de usuarios (Keycloak)</td><td><a href="http://localhost:8095">http://localhost:8095</a></td></tr>
         </tbody>
       </table>
@@ -353,11 +354,27 @@ curl -X POST http://localhost:8082/api/items \
   -H "Authorization: Bearer $PRODUCER_ADMIN_TOKEN" -H 'Content-Type: application/json' \
   -d '{"nombre":"Creado en el Producer","estado":"ACTIVO","tipo":"SERVICIO"}'</code></pre>
       <p>Después, en la aplicación, pulsa <span class="btn">Sincronizar ahora</span> para verlo.</p>
+      <h3>Actualizar a una versión nueva</h3>
+      <p>Basta con <code>docker compose up -d --build</code>. Los datos se conservan: la estructura de cada base de datos
+        está versionada (Flyway, <code>db/migration</code>) y se aplica sola al arrancar; si no coincide con la que espera
+        la aplicación, esta no arranca en lugar de trabajar sobre datos inconsistentes. Para empezar de cero:
+        <code>docker compose down -v</code>.</p>
+      <h3>Acceso cifrado (HTTPS)</h3>
+      <p>Opcional. Genera un certificado de desarrollo y arranca con el fichero TLS; la aplicación queda en
+        <a href="https://localhost:8443">https://localhost:8443</a> (el navegador pedirá aceptar el certificado la primera vez):</p>
+      <pre><code>./scripts/gen-dev-cert.sh
+docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build</code></pre>
+      <h3>Cambiar los tokens del Producer sin cortar el servicio</h3>
+      <p>En <code>.env</code>, copia el valor actual a <code>CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS</code> (o
+        <code>PRODUCER_ADMIN_TOKEN_PREVIOUS</code>), pon el nuevo en la variable principal y ejecuta
+        <code>docker compose up -d</code>. Cuando todo funcione con el nuevo, vacía la variable <code>_PREVIOUS</code> y
+        repite el comando.</p>
       <h3>Más recursos</h3>
       <ul>
         <li><a href="api.html">Referencia de las APIs (Swagger)</a> — todos los endpoints de ambas APIs.</li>
         <li><a href="curl.md">Ejemplos con curl</a> y <a href="catalogo.postman_collection.json">colección de Postman</a>.</li>
         <li><a href="../README.md">README</a> — arquitectura, decisiones técnicas, supuestos y limitaciones.</li>
+        <li><a href="VERIFICACION.md">Reporte de verificación</a> — última ejecución de todas las pruebas.</li>
         <li>Métricas técnicas: <code>/actuator/prometheus</code> en la Consumer API, con el usuario <code>admin</code>.</li>
         <li>Usuarios y contraseñas: consola de Keycloak en <a href="http://localhost:8095">http://localhost:8095</a>.</li>
       </ul>
@@ -370,9 +387,15 @@ curl -X POST http://localhost:8082/api/items \
         marca como pendiente hasta recibir la confirmación, que normalmente llega en uno o dos segundos.</p>
       <h3>¿Puedo perder un cambio si se cae la conexión o se reinicia el sistema?</h3>
       <p>No. El cambio queda guardado antes de que veas «pendiente» y se reenvía solo hasta que se confirma, sin
-        duplicarse.</p>
+        duplicarse, aunque llegue dos veces a la vez a la fuente de verdad.</p>
       <h3>No puedo editar un ítem, ¿por qué?</h3>
       <p>Tiene un cambio pendiente o con error. Espera a que se sincronice o resuelve el error (descartar o reintentar).</p>
+      <h3>¿Pierdo mis datos al actualizar el sistema?</h3>
+      <p>No. <code>docker compose up -d --build</code> conserva los datos y adapta la base de datos sola. Solo
+        <code>docker compose down -v</code> los borra.</p>
+      <h3>El navegador avisa de que la conexión HTTPS no es privada.</h3>
+      <p>Es el certificado de desarrollo, autofirmado. Acéptalo una vez; con un dominio real se usa un certificado
+        de una autoridad reconocida y el aviso desaparece.</p>
       <h3>No veo un ítem que se creó en otro sistema.</h3>
       <p>Pulsa <span class="btn">Sincronizar ahora</span>, o espera como mucho un minuto.</p>
     </section>

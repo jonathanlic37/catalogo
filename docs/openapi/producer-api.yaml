@@ -18,6 +18,9 @@ info:
     | Servicio (Consumer) | `CONSUMER_TO_PRODUCER_TOKEN` | Enviar el webhook y leer. **No** puede escribir directamente (403). |
     | Administración | `PRODUCER_ADMIN_TOKEN` | Leer, crear/editar/borrar directamente y ver métricas. **No** puede usar el webhook (403). |
 
+    **Rotación sin corte:** cada credencial admite un valor anterior opcional
+    (`CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS`, `PRODUCER_ADMIN_TOKEN_PREVIOUS`) aceptado con el mismo rol.
+
     Los errores siguen RFC 7807 (`application/problem+json`) y nunca incluyen trazas.
 servers:
   - url: http://localhost:8082
@@ -112,6 +115,8 @@ paths:
 
         - **Idempotencia:** la misma `Idempotency-Key` con el mismo contenido devuelve la respuesta
           original sin reaplicar (`Idempotent-Replayed: true`); con otro contenido → 409.
+          También con entregas **simultáneas** de la misma clave: una sola se aplica y las demás
+          reciben el replay (o 409 si el contenido difiere), nunca un 500.
         - **Versión:** si `baseVersion` no coincide con la versión actual → 409 y no se modifica nada
           (también en borrados).
         - **Fuera de orden:** un evento sin `baseVersion` con `occurredAt` anterior al último aplicado

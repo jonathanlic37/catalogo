@@ -23,6 +23,12 @@ npx playwright test
 
 El CI (`.github/workflows/ci.yml`) lo ejecuta así en cada push, tras el smoke de API.
 
+Contra el modo TLS (`docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build`):
+
+```bash
+E2E_BASE_URL=https://localhost:8443 npx playwright test   # el certificado autofirmado se acepta (ignoreHTTPSErrors)
+```
+
 Sin Node ni navegador, el mismo login OIDC con PKCE se puede comprobar con `curl`: autorización →
 formulario de Keycloak → redirección a `/callback` con el código → canje con `code_verifier`.
 Así se verificó en local (ver `docs/AUDITORIA.md`, V13).

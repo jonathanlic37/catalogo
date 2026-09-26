@@ -1,0 +1,8 @@
+-- Esquema inicial, volcado del DDL que genera Hibernate (schema-generation scripts), no escrito a mano.
+-- IF NOT EXISTS: las BD creadas antes con ddl-auto=update ya tienen estas tablas (baseline en versión 0).
+create table if not exists items (sync_attempts integer not null, fecha_actualizacion timestamp not null, fecha_creacion timestamp not null, next_retry_at timestamp, version bigint not null, estado varchar(20) not null check (estado in ('ACTIVO','INACTIVO')), failure_reason varchar(20) check (failure_reason in ('CONFLICT','GONE','REJECTED')), pending_event varchar(20) check (pending_event in ('CREATED','UPDATED','DELETED')), sync_status varchar(20) not null check (sync_status in ('PENDING','CONFIRMED','FAILED')), tipo varchar(20) check (tipo in ('PRODUCTO','SERVICIO','CONTENIDO')), id varchar(36) not null, idempotency_key varchar(100), nombre varchar(120) not null, last_sync_error varchar(500), descripcion varchar(1000), primary key (id));
+create table if not exists outbox_events (attempts integer not null, created_at timestamp not null, next_attempt_at timestamp, occurred_at timestamp not null, sent_at timestamp, event_type varchar(20) not null check (event_type in ('CREATED','UPDATED','DELETED')), status varchar(20) not null check (status in ('PENDING','SENT','FAILED')), item_id varchar(36) not null, id varchar(100) not null, last_error varchar(500), payload varchar(4000) not null, primary key (id));
+create index if not exists idx_items_sync on items (sync_status, next_retry_at);
+create index if not exists idx_items_fecha_act on items (fecha_actualizacion);
+create index if not exists idx_outbox_status_next on outbox_events (status, next_attempt_at);
+create index if not exists idx_outbox_item on outbox_events (item_id);

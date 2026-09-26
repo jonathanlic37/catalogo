@@ -1,6 +1,8 @@
 # --- Secretos y configuración local ---
 .env
 .env.*.local
+# Certificado TLS de desarrollo (scripts/gen-dev-cert.sh)
+certs/
 
 # --- Bases de datos SQLite (se crean en runtime) ---
 *.db

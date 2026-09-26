@@ -15,6 +15,8 @@ export default defineConfig({
   outputDir: 'test-results',
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:8088',
+    // Con docker-compose.tls.yml (E2E_BASE_URL=https://localhost:8443) el certificado es autofirmado.
+    ignoreHTTPSErrors: true,
     locale: 'es-ES',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
