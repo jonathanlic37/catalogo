@@ -519,6 +519,7 @@ Los tests de backend montan la raíz del repositorio porque los contratos viven 
 
 El CI (`.github/workflows/ci.yml`) ejecuta las tres suites, valida `docker compose config` y lanza
 el smoke y el E2E de navegador tras `cp .env.example .env && docker compose up -d --build`.
+La última ejecución local de todas las suites está en [`docs/VERIFICACION.md`](docs/VERIFICACION.md).
 
 ## 12. Decisiones técnicas y trade-offs
 
