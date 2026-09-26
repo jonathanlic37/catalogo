@@ -80,6 +80,11 @@ send() { curl -si -X POST "$PRODUCER/webhooks/catalogo" -H "$PROD_AUTH" -H "Idem
 send "$BODY"     # 201 · Idempotent-Replayed: false
 send "$BODY"     # 201 · Idempotent-Replayed: true  → misma respuesta, no se aplica dos veces
 send "{\"id\":\"$NEWID\",\"nombre\":\"Otro\",\"estado\":\"ACTIVO\"}"   # 409: clave reutilizada con otro contenido
+
+# Entregas simultáneas con una clave nueva: una sola se aplica (false), las demás son replay (true); ningún 500.
+KEY=$(python3 -c 'import uuid;print(uuid.uuid4())'); NEWID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+BODY="{\"id\":\"$NEWID\",\"nombre\":\"Simultaneo\",\"estado\":\"ACTIVO\"}"
+for i in 1 2 3 4 5; do send "$BODY" & done; wait
 ```
 
 ## 6. Conflicto: el registro cambió en el Producer antes de recibir la modificación
@@ -126,6 +131,27 @@ curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: applica
   -d '{"nombre":"","estado":"ACTIVO"}'                          # 400 ProblemDetail con errores por campo, sin stack trace
 curl -s -X POST "$CONSUMER/api/items" -H "$FRONT_AUTH" -H 'Content-Type: application/json' \
   -d '{"nombre":"X","estado":"ACTIVO","syncStatus":"CONFIRMED"}' # 400: campo no permitido
+```
+
+Rotación de un token del Producer sin corte (README §8): el valor anterior se acepta con su mismo rol.
+
+```bash
+NUEVO=$(openssl rand -hex 32)
+sed -i "s/^CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS=.*/CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS=$CONSUMER_TO_PRODUCER_TOKEN/; \
+        s/^CONSUMER_TO_PRODUCER_TOKEN=.*/CONSUMER_TO_PRODUCER_TOKEN=$NUEVO/" .env
+docker compose up -d                                             # Producer acepta ambos; el Consumer pasa al nuevo
+curl -s -o /dev/null -w '%{http_code}\n' "$PRODUCER/api/items" -H "Authorization: Bearer $CONSUMER_TO_PRODUCER_TOKEN"  # 200 (anterior)
+curl -s -o /dev/null -w '%{http_code}\n' "$PRODUCER/api/items" -H "Authorization: Bearer $NUEVO"                      # 200 (nuevo)
+sed -i "s/^CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS=.*/CONSUMER_TO_PRODUCER_TOKEN_PREVIOUS=/" .env
+docker compose up -d                                             # cierra la ventana: el anterior ya da 401
+set -a; source .env; set +a
+```
+
+Con TLS (`docker-compose.tls.yml`, README §2), la UI y su proxy `/api` van por HTTPS:
+
+```bash
+curl -skI https://localhost:${TLS_PORT:-8443}/ | grep -iE '^HTTP|strict-transport|content-security'   # HTTP/2 200 + HSTS + CSP
+curl -sk -o /dev/null -w '%{http_code}\n' https://localhost:${TLS_PORT:-8443}/api/items                # 401 sin token
 ```
 
 ## 9. Observabilidad

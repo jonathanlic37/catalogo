@@ -202,6 +202,7 @@ docker compose up --build</code></pre>
         <thead><tr><th>Qué</th><th>Dirección</th></tr></thead>
         <tbody>
           <tr><td>La aplicación</td><td><a href="http://localhost:8088">http://localhost:8088</a></td></tr>
+          <tr><td>La aplicación con HTTPS (opcional, ver «Acceso cifrado»)</td><td><a href="https://localhost:8443">https://localhost:8443</a></td></tr>
           <tr><td>Consola de usuarios (Keycloak)</td><td><a href="http://localhost:8095">http://localhost:8095</a></td></tr>
         </tbody>
       </table>
@@ -389,6 +390,12 @@ docker compose -f docker-compose.yml -f docker-compose.tls.yml up -d --build</co
         duplicarse, aunque llegue dos veces a la vez a la fuente de verdad.</p>
       <h3>No puedo editar un ítem, ¿por qué?</h3>
       <p>Tiene un cambio pendiente o con error. Espera a que se sincronice o resuelve el error (descartar o reintentar).</p>
+      <h3>¿Pierdo mis datos al actualizar el sistema?</h3>
+      <p>No. <code>docker compose up -d --build</code> conserva los datos y adapta la base de datos sola. Solo
+        <code>docker compose down -v</code> los borra.</p>
+      <h3>El navegador avisa de que la conexión HTTPS no es privada.</h3>
+      <p>Es el certificado de desarrollo, autofirmado. Acéptalo una vez; con un dominio real se usa un certificado
+        de una autoridad reconocida y el aviso desaparece.</p>
       <h3>No veo un ítem que se creó en otro sistema.</h3>
       <p>Pulsa <span class="btn">Sincronizar ahora</span>, o espera como mucho un minuto.</p>
     </section>
