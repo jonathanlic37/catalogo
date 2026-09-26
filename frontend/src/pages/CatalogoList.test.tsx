@@ -98,6 +98,46 @@ describe('CatalogoList', () => {
     );
   });
 
+  it('ante un conflicto o un ítem ya borrado no ofrece «Reintentar» (volvería a fallar), solo descartar', async () => {
+    mockFetch((_m, url) =>
+      url.startsWith('/api/items/summary')
+        ? summary({ total: 2, fallidos: 2 })
+        : page([
+            item({ id: 'c', nombre: 'EnConflicto', syncStatus: 'FAILED', failureReason: 'CONFLICT', syncError: 'Conflicto' }),
+            item({ id: 'g', nombre: 'Borrado', syncStatus: 'FAILED', failureReason: 'GONE', syncError: 'Ya no existe' }),
+          ]),
+    );
+    render();
+
+    expect(await screen.findByLabelText('Descartar cambio de EnConflicto')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Reintentar EnConflicto')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Descartar cambio de Borrado')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Reintentar Borrado')).not.toBeInTheDocument();
+  });
+
+  it('un rechazo sí ofrece «Reintentar»', async () => {
+    mockFetch((_m, url) =>
+      url.startsWith('/api/items/summary')
+        ? summary({ total: 1, fallidos: 1 })
+        : page([item({ id: 'r', nombre: 'Rechazado', syncStatus: 'FAILED', failureReason: 'REJECTED', syncError: 'HTTP 403' })]),
+    );
+    render();
+    expect(await screen.findByLabelText('Reintentar Rechazado')).toBeInTheDocument();
+  });
+
+  it('con el Producer caído muestra que se reintenta solo y en qué intento va', async () => {
+    mockFetch((_m, url) =>
+      url.startsWith('/api/items/summary')
+        ? summary({ total: 1, pendientes: 1 })
+        : page([
+            item({ id: 'p', nombre: 'Esperando', syncStatus: 'PENDING', pendingOperation: 'UPDATED', syncError: 'Producer no disponible', syncAttempts: 4 }),
+          ]),
+    );
+    render();
+    expect(await screen.findByText(/Reintentando automáticamente · Producer no disponible \(intento 4\)/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Reintentar Esperando')).not.toBeInTheDocument();
+  });
+
   it('con un cambio fallido ofrece también descartarlo', async () => {
     mockFetch((_m, url) =>
       url.startsWith('/api/items/summary')

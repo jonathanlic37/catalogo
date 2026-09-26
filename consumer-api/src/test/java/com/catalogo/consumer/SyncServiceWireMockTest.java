@@ -222,7 +222,39 @@ class SyncServiceWireMockTest {
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(id)).isEqualTo("FAILED"));
         assertThat(producer.findAll(postRequestedFor(urlEqualTo(WEBHOOK)).withRequestBody(containing(id)))).hasSize(1);
         mvc.perform(get("/api/items/" + id).with(user()))
-                .andExpect(jsonPath("$.syncError").value(org.hamcrest.Matchers.containsString("Conflicto")));
+                .andExpect(jsonPath("$.syncError").value(org.hamcrest.Matchers.containsString("Conflicto")))
+                .andExpect(jsonPath("$.failureReason").value("CONFLICT"));
+    }
+
+    @Test
+    void elMotivoDelFalloDistingueRechazoDeItemInexistente() throws Exception {
+        // Otro 4xx (p. ej. validación) → REJECTED: reintentar tiene sentido tras corregir la causa.
+        stubStatus(422);
+        String rechazado = create("Rechazado");
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(rechazado)).isEqualTo("FAILED"));
+        mvc.perform(get("/api/items/" + rechazado).with(user()))
+                .andExpect(jsonPath("$.failureReason").value("REJECTED"));
+
+        // Editar un ítem que el Producer ya borró (404) → GONE: solo cabe descartar.
+        producer.resetMappings();
+        stubOk();
+        String borrado = create("Borrado en el Producer");
+        awaitConfirmed(borrado);
+        producer.resetMappings();
+        stubStatus(404);
+        mvc.perform(put("/api/items/" + borrado).with(user()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nombre\":\"Tarde\",\"estado\":\"ACTIVO\"}"))
+                .andExpect(status().isAccepted());
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(syncStatus(borrado)).isEqualTo("FAILED"));
+        mvc.perform(get("/api/items/" + borrado).with(user()))
+                .andExpect(jsonPath("$.failureReason").value("GONE"));
+
+        // Un ítem sin fallo no expone motivo.
+        producer.resetMappings();
+        stubOk();
+        String ok = create("Sin fallo");
+        awaitConfirmed(ok);
+        mvc.perform(get("/api/items/" + ok).with(user())).andExpect(jsonPath("$.failureReason").doesNotExist());
     }
 
     @Test

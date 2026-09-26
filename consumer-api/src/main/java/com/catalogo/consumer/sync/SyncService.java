@@ -4,6 +4,7 @@ package com.catalogo.consumer.sync;
 import com.catalogo.consumer.dto.ProducerItem;
 import com.catalogo.consumer.dto.WebhookPayload;
 import com.catalogo.consumer.model.EventType;
+import com.catalogo.consumer.model.FailureReason;
 import com.catalogo.consumer.model.Item;
 import com.catalogo.consumer.model.OutboxEvent;
 import com.catalogo.consumer.model.OutboxStatus;
@@ -166,16 +167,33 @@ public class SyncService {
         } else if (result.status() == 409 && conflictPolicy != ConflictPolicy.MANUAL) {
             metrics.conflict();
             resolveConflict(event, item, payload);
-        } else if (result.status() >= 500 || result.isSuccess()) {
+        } else if (isTransient(result)) {
             metrics.retry();
             scheduleRetry(event, item, "Error del Producer (HTTP " + result.status() + ")");
             return false;
         } else {
-            // 4xx: el Producer rechazó el cambio; reintentar con el mismo contenido no lo arregla.
+            // 4xx definitivo: el Producer rechazó el cambio; reenviar el mismo contenido no lo arregla.
             metrics.failure();
-            fail(event, item, rejectionMessage(result.status()));
+            fail(event, item, rejectionMessage(result.status()), reasonFor(result.status()));
         }
         return true;
+    }
+
+    /**
+     * Fallo transitorio: el Producer no pudo procesarlo ahora (5xx, timeout 408, 425, límite 429, o un
+     * 2xx sin cuerpo). Se reintenta indefinidamente con backoff; nunca se da por fallido por sí solo.
+     */
+    private static boolean isTransient(ProducerWebhookClient.WebhookResult result) {
+        int s = result.status();
+        return s >= 500 || s == 408 || s == 425 || s == 429 || result.isSuccess();
+    }
+
+    private static FailureReason reasonFor(int status) {
+        return switch (status) {
+            case 409 -> FailureReason.CONFLICT;
+            case 404 -> FailureReason.GONE;
+            default -> FailureReason.REJECTED;
+        };
     }
 
     /** Resuelve un conflicto de versión según la política configurada. */
@@ -200,14 +218,15 @@ public class SyncService {
         int attempts = event.getAttempts() + 1;
         event.setAttempts(attempts);
         if (attempts >= maxRetries) {
+            // Conflictos repetidos (otro escritor cambia el ítem una y otra vez): se deja al usuario.
             metrics.failure();
-            fail(event, item, rejectionMessage(409));
+            fail(event, item, rejectionMessage(409), FailureReason.CONFLICT);
             return;
         }
         Optional<ProducerItem> remote = client.fetch(event.getItemId());
         if (remote.isEmpty()) {
             metrics.failure();
-            fail(event, item, "El ítem ya no existe en el Producer; descarte el cambio");
+            fail(event, item, rejectionMessage(404), FailureReason.GONE);
             return;
         }
         WebhookPayload rebased = new WebhookPayload(payload.id(), payload.nombre(), payload.descripcion(),
@@ -234,40 +253,40 @@ public class SyncService {
         tx.executeWithoutResult(s -> doScheduleRetry(event, item, error));
     }
 
+    /**
+     * Fallo transitorio: el evento sigue PENDING y se reprograma con backoff exponencial
+     * (SYNC_RETRY_INTERVAL_MS × 2ⁿ, tope de 5 min). No se da por fallido: cuando el Producer vuelva,
+     * el cambio se confirma solo, sin que el usuario tenga que reintentar ítem por ítem.
+     */
     private void doScheduleRetry(OutboxEvent event, Item item, String error) {
         int attempts = event.getAttempts() + 1;
         event.setAttempts(attempts);
         event.setLastError(error);
-        if (attempts >= maxRetries) {
-            event.setStatus(OutboxStatus.FAILED);
-            event.setNextAttemptAt(null);
-            log.warn("Evento {} marcado FAILED tras {} intentos: {}", event.getId(), attempts, error);
-        } else {
-            Duration backoff = Duration.ofMillis(retryIntervalMs).multipliedBy(1L << Math.min(attempts - 1, 10));
-            if (backoff.compareTo(MAX_BACKOFF) > 0) {
-                backoff = MAX_BACKOFF;
-            }
-            event.setNextAttemptAt(Instant.now().plus(backoff));
-            log.warn("Evento {} pendiente, reintento {}/{}: {}", event.getId(), attempts, maxRetries, error);
+        Duration backoff = Duration.ofMillis(retryIntervalMs).multipliedBy(1L << Math.min(attempts - 1, 10));
+        if (backoff.compareTo(MAX_BACKOFF) > 0) {
+            backoff = MAX_BACKOFF;
         }
+        event.setNextAttemptAt(Instant.now().plus(backoff));
         outbox.save(event);
-        mirrorItem(item, attempts, error, event.getNextRetryAt());
+        mirrorItem(item, attempts, error, event.getNextAttemptAt(), null);
+        log.warn("Evento {} pendiente, intento {} fallido ({}); siguiente en {} s",
+                event.getId(), attempts, error, backoff.toSeconds());
     }
 
     /** Evento FAILED y estado del ítem en la misma transacción (queda registrado para reintento/auditoría). */
-    private void fail(OutboxEvent event, Item item, String error) {
+    private void fail(OutboxEvent event, Item item, String error, FailureReason reason) {
         tx.executeWithoutResult(s -> {
             event.setStatus(OutboxStatus.FAILED);
             event.setLastError(error);
             event.setNextAttemptAt(null);
             outbox.save(event);
-            mirrorItem(item, item == null ? 0 : item.getSyncAttempts(), error, null);
+            mirrorItem(item, item == null ? 0 : item.getSyncAttempts(), error, null, reason);
         });
-        log.warn("Evento {} marcado FAILED: {}", event.getId(), error);
+        log.warn("Evento {} marcado FAILED ({}): {}", event.getId(), reason, error);
     }
 
     /** Mantiene el estado de sincronización del ítem (contrato de la UI) alineado con el outbox. */
-    private void mirrorItem(Item item, int attempts, String error, Instant nextRetryAt) {
+    private void mirrorItem(Item item, int attempts, String error, Instant nextRetryAt, FailureReason reason) {
         if (item == null) {
             return;
         }
@@ -275,6 +294,7 @@ public class SyncService {
         item.setLastSyncError(error);
         item.setNextRetryAt(nextRetryAt);
         item.setSyncStatus(nextRetryAt == null ? SyncStatus.FAILED : SyncStatus.PENDING);
+        item.setFailureReason(reason);
         repository.save(item);
     }
 

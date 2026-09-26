@@ -108,8 +108,11 @@ docker compose restart consumer-api                      # reinicio del Consumer
 docker compose start producer-api                        # el relay reintenta con backoff y lo confirma
 ```
 
-Un evento que agota los reintentos queda `FAILED`. Se puede reintentar con
-`POST /api/items/{id}/retry` (misma Idempotency-Key) o descartar con `POST /api/items/{id}/resync`.
+Mientras el Producer está caído el ítem sigue `PENDING`, con `syncError` y `syncAttempts` del último
+intento: los fallos transitorios se reintentan sin límite y nunca pasan a `FAILED`. Solo un rechazo
+del Producer (4xx) deja el ítem `FAILED`, con `failureReason` = `CONFLICT`, `GONE` o `REJECTED`. Se
+descarta con `POST /api/items/{id}/resync`; si el motivo es `REJECTED` también se puede reenviar con
+`POST /api/items/{id}/retry` (misma Idempotency-Key).
 
 ## 8. Seguridad y validación
 

@@ -16,7 +16,13 @@ export interface Item {
   syncStatus: SyncStatus;
   pendingOperation?: PendingOperation;
   syncError?: string;
+  /** Intentos del último envío (también mientras se reintenta). */
+  syncAttempts?: number;
+  /** Solo en FAILED: CONFLICT (versión obsoleta), GONE (ya no existe) o REJECTED (otro rechazo). */
+  failureReason?: FailureReason;
 }
+
+export type FailureReason = 'CONFLICT' | 'GONE' | 'REJECTED';
 
 export interface ItemInput {
   nombre: string;

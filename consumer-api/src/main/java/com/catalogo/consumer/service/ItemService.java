@@ -169,6 +169,7 @@ public class ItemService {
         item.setSyncStatus(SyncStatus.PENDING);
         item.setSyncAttempts(0);
         item.setLastSyncError(null);
+        item.setFailureReason(null);
         item.setNextRetryAt(now);
         Item saved = repository.save(item);
         events.publishEvent(new SyncRequested(saved.getId()));
@@ -192,6 +193,7 @@ public class ItemService {
         item.setIdempotencyKey(key);
         item.setSyncAttempts(0);
         item.setLastSyncError(null);
+        item.setFailureReason(null);
         item.setNextRetryAt(now);
     }
 
